@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Schibsted Grotesk", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html,
+body {
+  @apply bg-[#f7f5f1] text-stone-900;
+  color-scheme: light;
+}
+
+/* soft tinted wash behind menu screens */
+.menu-backdrop {
+  position: absolute;
+  inset: -20%;
+  background:
+    radial-gradient(45% 40% at 22% 25%, rgba(120, 130, 220, 0.1), transparent 70%),
+    radial-gradient(40% 35% at 78% 70%, rgba(214, 155, 88, 0.08), transparent 70%),
+    radial-gradient(35% 30% at 60% 15%, rgba(96, 170, 140, 0.07), transparent 70%);
+  animation: backdrop-drift 24s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes backdrop-drift {
+  from {
+    transform: translate3d(-2%, -1%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(2%, 2%, 0) scale(1.08);
+  }
+}
+
+/* lobby "scribbling" loader — a pencil line drawing itself */
+.scribble-loader {
+  width: 220px;
+  height: 44px;
+}
+
+.scribble-loader path {
+  stroke-dasharray: 300;
+  stroke-dashoffset: 300;
+  animation: scribble-draw 2.4s ease-in-out infinite;
+}
+
+@keyframes scribble-draw {
+  0% {
+    stroke-dashoffset: 300;
+  }
+  55% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -300;
+  }
+}

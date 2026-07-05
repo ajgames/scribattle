@@ -1,0 +1,24 @@
+.DS_Store
+.env
+/node_modules/
+
+# React Router
+/.react-router/
+/build/
+/logs/
+
+# Server build output
+/server/dist/
+
+# Drizzle
+/database/migrations/meta/
+
+# local-only architecture reference (its own git repo)
+/realtime-example-battleroll/
+
+# old prototype's compiled binary
+/old-server/scribattle-server
+
+# old prototypes (own git repos, kept local-only)
+/old-client/
+/old-server/
