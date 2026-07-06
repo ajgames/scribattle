@@ -27,7 +27,10 @@ const MAX_GUESS_LENGTH = 64;
 const MAX_STROKE_FLOATS = 4096;
 const MAX_STROKES_PER_TURN = 600;
 
-const GUESSER_POINTS = 100;
+// a correct guess is worth less the later in the turn it lands: linear decay
+// from MAX (instant guess) to MIN (buzzer-beater)
+const MAX_GUESSER_POINTS = 100;
+const MIN_GUESSER_POINTS = 20;
 const ARTIST_POINTS = 25;
 
 /** Hard ceiling on the turn clock — rooms can be faster, never slower. */
@@ -486,7 +489,8 @@ export const endTurn = spacetimedb.reducer(ctx => {
 /**
  * A guess from a non-artist. Wrong guesses land in the public feed; a correct
  * one scores guesser + artist and is stored with empty text so the word never
- * leaks into the feed. When every guesser has it, the turn rotates.
+ * leaks into the feed. Guesser points decay with the turn clock — the earlier
+ * the solve, the bigger the score. When every guesser has it, the turn rotates.
  */
 export const submitGuess = spacetimedb.reducer({ text: t.string() }, (ctx, { text }) => {
   const me = ctx.db.player.identity.find(ctx.sender);
@@ -518,7 +522,13 @@ export const submitGuess = spacetimedb.reducer({ text: t.string() }, (ctx, { tex
   });
   if (!correct) return;
 
-  ctx.db.player.identity.update({ ...me, score: me.score + GUESSER_POINTS });
+  const elapsed = Number(ctx.timestamp.since(room.turnStartedAt).micros);
+  const turnMicros = room.turnSeconds * 1_000_000;
+  const remaining = Math.min(Math.max(1 - elapsed / turnMicros, 0), 1);
+  const earned = Math.round(
+    MIN_GUESSER_POINTS + (MAX_GUESSER_POINTS - MIN_GUESSER_POINTS) * remaining
+  );
+  ctx.db.player.identity.update({ ...me, score: me.score + earned });
   const artist = ctx.db.player.identity.find(room.artist);
   if (artist) {
     ctx.db.player.identity.update({ ...artist, score: artist.score + ARTIST_POINTS });

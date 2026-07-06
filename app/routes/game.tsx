@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { ClientOnly } from '../components/ClientOnly';
 import { DrawCanvas } from '../game/three/DrawCanvas';
+import { hintedWordDisplay } from '../game/hints';
 import { loadStoredUsername } from '../game/names';
 import { useGameStore, type VoteCategory } from '../game/store';
 import {
@@ -120,16 +121,19 @@ export default function Game({ params }: Route.ComponentProps) {
     endTurn();
   }, [playing, secondsLeft]);
 
-  // guessers see the word's shape (letter blanks, wide gaps between words);
-  // only the artist sees the word. Rendered with whitespace-pre so the gaps hold.
+  // guessers see the word's shape (letter blanks, wide gaps between words)
+  // with letters filling in as hints — exponentially faster as the clock runs
+  // out. The artist (and anyone who already solved it) sees the whole word.
+  // Rendered with whitespace-pre so the gaps hold.
+  const elapsedFraction =
+    playing && secondsLeft != null && room.turnSeconds > 0
+      ? 1 - secondsLeft / room.turnSeconds
+      : 0;
   const wordDisplay = !playing
     ? ''
-    : isArtist
+    : isArtist || guessedThisTurn
       ? room.currentWord
-      : room.currentWord
-          .split(' ')
-          .map(word => word.replace(/./g, '_').split('').join(' '))
-          .join('   ');
+      : hintedWordDisplay(room.currentWord, room.turn, elapsedFraction);
 
   function handleGuess() {
     const text = guessDraft.trim();

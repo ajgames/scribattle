@@ -94,9 +94,23 @@ function InkStroke({ points, color, width, threeD, paperW, paperH, order }: InkS
   );
 }
 
+/**
+ * A stroke the artist released that hasn't echoed back from the server yet.
+ * Kept rendered locally so the ink doesn't blink out during the round-trip.
+ */
+interface PendingStroke {
+  key: number;
+  points: number[];
+  color: string;
+  width: number;
+  threeD: boolean;
+}
+
 interface SceneProps {
   strokes: StrokeInfo[];
   liveStroke: LiveStrokeInfo | null;
+  /** Released-but-unconfirmed strokes (artist only). */
+  pending: PendingStroke[];
   /** The local artist's in-progress stroke (preview before commit). */
   draft: number[] | null;
   canDraw: boolean;
@@ -138,7 +152,7 @@ function SizeSync({ target }: { target: React.RefObject<HTMLDivElement | null> }
   return null;
 }
 
-function Scene({ strokes, liveStroke, draft, canDraw, color, width, threeD }: SceneProps) {
+function Scene({ strokes, liveStroke, pending, draft, canDraw, color, width, threeD }: SceneProps) {
   const [paperW, paperH] = usePaperSize();
   return (
     <>
@@ -163,6 +177,21 @@ function Scene({ strokes, liveStroke, draft, canDraw, color, width, threeD }: Sc
           order={i}
         />
       ))}
+      {/* released strokes still in flight to the server (artist only) —
+          rendering them until the authoritative row echoes back is what keeps
+          the ink from blinking out on pointer-up */}
+      {pending.map((p, i) => (
+        <InkStroke
+          key={p.key}
+          points={p.points}
+          color={p.color}
+          width={p.width}
+          threeD={p.threeD}
+          paperW={paperW}
+          paperH={paperH}
+          order={strokes.length + i}
+        />
+      ))}
       {/* my in-progress stroke (artist preview) */}
       {draft && draft.length >= 4 && (
         <InkStroke
@@ -172,7 +201,7 @@ function Scene({ strokes, liveStroke, draft, canDraw, color, width, threeD }: Sc
           threeD={threeD}
           paperW={paperW}
           paperH={paperH}
-          order={strokes.length + 1}
+          order={strokes.length + pending.length + 1}
         />
       )}
       {/* the artist's in-flight stroke, streamed to everyone else */}
@@ -221,16 +250,52 @@ export function DrawCanvas({
   const drawing = useRef<number[] | null>(null);
   const lastProgressAt = useRef(0);
   const [draft, setDraft] = useState<number[] | null>(null);
+  // released strokes awaiting their server echo (see PendingStroke)
+  const [pending, setPending] = useState<PendingStroke[]>([]);
+  const pendingKey = useRef(0);
+
+  // retire pending strokes as their authoritative rows arrive: the artist is
+  // the only writer, so strokes come back in commit order — each new row
+  // confirms the oldest pending one. A shrink means clear-canvas / turn
+  // rotation; drop them all.
+  const strokeCount = useRef(strokes.length);
+  useEffect(() => {
+    const prev = strokeCount.current;
+    strokeCount.current = strokes.length;
+    if (strokes.length > prev) {
+      setPending(p => (p.length ? p.slice(strokes.length - prev) : p));
+    } else if (strokes.length < prev) {
+      setPending(p => (p.length ? [] : p));
+    }
+  }, [strokes.length]);
+
+  // rebuild the draft tube at most once per frame — pointermove can fire at
+  // 120Hz+ and each rebuild is a fresh TubeGeometry
+  const draftRaf = useRef(0);
+  function scheduleDraft() {
+    if (draftRaf.current) return;
+    draftRaf.current = requestAnimationFrame(() => {
+      draftRaf.current = 0;
+      if (drawing.current) setDraft(drawing.current.slice());
+    });
+  }
+  useEffect(
+    () => () => {
+      if (draftRaf.current) cancelAnimationFrame(draftRaf.current);
+    },
+    []
+  );
 
   // dropping the brush mid-stroke (artist rotated away) shouldn't strand ink
   useEffect(() => {
     if (!canDraw) {
       drawing.current = null;
       setDraft(null);
+      setPending([]);
     }
   }, [canDraw]);
 
-  function samplePoint(e: React.PointerEvent): [number, number] {
+  function samplePoint(e: { clientX: number; clientY: number }): [number, number] {
     const rect = wrapRef.current!.getBoundingClientRect();
     return [
       THREE.MathUtils.clamp((e.clientX - rect.left) / rect.width, 0, 1),
@@ -251,13 +316,26 @@ export function DrawCanvas({
 
   function handleMove(e: React.PointerEvent) {
     const pts = drawing.current;
-    if (!pts || pts.length >= MAX_POINTS_PER_STROKE * 2) return;
-    const [x, y] = samplePoint(e);
-    const dx = x - pts[pts.length - 2];
-    const dy = y - pts[pts.length - 1];
-    if (Math.hypot(dx, dy) < MIN_SAMPLE_DIST) return;
-    pts.push(x, y);
-    setDraft(pts.slice());
+    if (!pts) return;
+    // coalesced events recover the full-rate pointer path the browser batched
+    // into this one event — fast flicks stay curved instead of going straight
+    const native = e.nativeEvent;
+    const samples =
+      typeof native.getCoalescedEvents === 'function' && native.getCoalescedEvents().length > 0
+        ? native.getCoalescedEvents()
+        : [native];
+    let grew = false;
+    for (const s of samples) {
+      if (pts.length >= MAX_POINTS_PER_STROKE * 2) break;
+      const [x, y] = samplePoint(s);
+      const dx = x - pts[pts.length - 2];
+      const dy = y - pts[pts.length - 1];
+      if (Math.hypot(dx, dy) < MIN_SAMPLE_DIST) continue;
+      pts.push(x, y);
+      grew = true;
+    }
+    if (!grew) return;
+    scheduleDraft();
     const now = performance.now();
     if (now - lastProgressAt.current >= PROGRESS_INTERVAL_MS) {
       lastProgressAt.current = now;
@@ -268,6 +346,10 @@ export function DrawCanvas({
   function handleUp(e: React.PointerEvent) {
     const pts = drawing.current;
     drawing.current = null;
+    if (draftRaf.current) {
+      cancelAnimationFrame(draftRaf.current);
+      draftRaf.current = 0;
+    }
     setDraft(null);
     if (!pts) return;
     try {
@@ -277,6 +359,8 @@ export function DrawCanvas({
     }
     // a tap becomes a dot — give it a second point so the tube has a path
     if (pts.length === 2) pts.push(pts[0] + MIN_SAMPLE_DIST, pts[1]);
+    // keep the ink on screen until the server echoes the committed stroke
+    setPending(p => [...p, { key: pendingKey.current++, points: pts, color, width, threeD }]);
     onStrokeEnd(pts);
   }
 
@@ -308,6 +392,7 @@ export function DrawCanvas({
         <Scene
           strokes={strokes}
           liveStroke={liveStroke}
+          pending={pending}
           draft={draft}
           canDraw={canDraw}
           color={color}
