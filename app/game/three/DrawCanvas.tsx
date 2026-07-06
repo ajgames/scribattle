@@ -1,67 +1,320 @@
-import { Canvas, useFrame } from '@react-three/fiber';
-import { useMemo, useRef } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import type { LiveStrokeInfo, StrokeInfo } from '../store';
 
 /**
- * R3F drawing-surface proof of concept: a paper plane with an ink stroke
- * "painted" onto it as 3D geometry (a tube swept along a curve).
+ * The shared drawing surface. Strokes are tubes swept along the pointer's
+ * path on a paper plane; by default they're squashed flat + unlit so they
+ * read as 2D ink, and the artist can toggle raised 3D relief per stroke.
  *
- * This is the seed of the 3D-painting upgrade — real strokes will be built
- * the same way from pointer input (raycast pointer → point on paper →
- * extend the curve), which unlocks brush thickness, ink relief, lighting,
- * and camera moves that a flat 2D canvas can't do.
+ * The camera looks straight down and the paper is sized to the canvas
+ * element's aspect ratio, so the paper fills whatever space the layout gives
+ * it. Because the paper fills the view exactly, pointer input is plain DOM
+ * math on the wrapper element (no raycasting): normalized 0..1 coords across
+ * the canvas ARE paper coords. That keeps the drawing resolution- and
+ * aspect-independent (clients with different window shapes see a slightly
+ * stretched, but complete, picture).
+ *
+ * The artist draws locally (live preview), streams progress through
+ * `onStrokeProgress` (throttled) and commits the finished stroke through
+ * `onStrokeEnd`; everyone renders the authoritative stroke list mirrored
+ * from SpacetimeDB, plus the artist's in-flight `liveStroke`.
  */
 
-function InkStroke() {
-  const group = useRef<THREE.Group>(null);
+const CAM_HEIGHT = 5;
+const CAM_FOV = 45;
+const INK_LIFT = 0.02; // ink floats a hair above the paper
+// stack strokes a hair apart so overlapping flat ink doesn't z-fight
+const LIFT_STEP = 0.0012;
+// skip pointer samples closer than this (normalized) — keeps curves smooth
+// and stroke payloads small
+const MIN_SAMPLE_DIST = 0.008;
+const MAX_POINTS_PER_STROKE = 2048; // pairs with the server's float cap
+const PROGRESS_INTERVAL_MS = 100; // live-stroke stream rate (~10 fps)
 
-  // a hand-drawn-looking squiggle across the paper
-  const tube = useMemo(() => {
-    const points = [
-      new THREE.Vector3(-2.4, 0.02, 0.5),
-      new THREE.Vector3(-1.6, 0.02, -0.6),
-      new THREE.Vector3(-0.8, 0.02, 0.7),
-      new THREE.Vector3(0, 0.02, -0.7),
-      new THREE.Vector3(0.8, 0.02, 0.6),
-      new THREE.Vector3(1.6, 0.02, -0.5),
-      new THREE.Vector3(2.4, 0.02, 0.4),
-    ];
-    const curve = new THREE.CatmullRomCurve3(points);
-    return new THREE.TubeGeometry(curve, 120, 0.045, 12, false);
-  }, []);
+/** World-space paper extents that exactly fill the camera's view. */
+function usePaperSize(): [number, number] {
+  const aspect = useThree(s => s.size.width / Math.max(1, s.size.height));
+  const h = 2 * CAM_HEIGHT * Math.tan(THREE.MathUtils.degToRad(CAM_FOV / 2));
+  return [h * aspect, h];
+}
 
-  useFrame(({ clock }) => {
-    if (!group.current) return;
-    // gentle idle float so the scene reads as alive
-    group.current.rotation.z = Math.sin(clock.elapsedTime * 0.4) * 0.02;
-  });
+function toWorld(points: number[], paperW: number, paperH: number, lift: number): THREE.Vector3[] {
+  const out: THREE.Vector3[] = [];
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    out.push(
+      new THREE.Vector3((points[i] - 0.5) * paperW, lift, (points[i + 1] - 0.5) * paperH)
+    );
+  }
+  return out;
+}
 
+interface InkStrokeProps {
+  points: number[];
+  color: string;
+  width: number;
+  threeD: boolean;
+  paperW: number;
+  paperH: number;
+  /** Stacking order — later strokes sit imperceptibly higher. */
+  order: number;
+}
+
+function InkStroke({ points, color, width, threeD, paperW, paperH, order }: InkStrokeProps) {
+  const geometry = useMemo(() => {
+    const path = toWorld(points, paperW, paperH, INK_LIFT + order * LIFT_STEP);
+    if (path.length < 2) return null;
+    const curve = new THREE.CatmullRomCurve3(path);
+    return new THREE.TubeGeometry(
+      curve,
+      Math.min(path.length * 4, 400),
+      width * paperW,
+      8,
+      false
+    );
+  }, [points, width, paperW, paperH, order]);
+
+  // geometry churns while a live stroke grows — free the replaced ones
+  useEffect(() => () => geometry?.dispose(), [geometry]);
+
+  if (!geometry) return null;
+  // Flat ink is a squashed tube a fraction of a millimeter above the paper —
+  // too close for the depth buffer, so it skips depth entirely and paints in
+  // stroke order over the paper (renderOrder 0). 3D strokes have real height
+  // and keep depth testing for their own shading/overlaps.
   return (
-    <group ref={group}>
-      {/* paper */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[7, 4.5]} />
-        <meshStandardMaterial color="#ffffff" roughness={0.95} />
-      </mesh>
-      {/* ink */}
-      <mesh geometry={tube} castShadow>
-        <meshStandardMaterial color="#1c1917" roughness={0.35} />
-      </mesh>
-    </group>
+    <mesh geometry={geometry} scale={threeD ? 1 : [1, 0.02, 1]} renderOrder={1 + order}>
+      {threeD ? (
+        <meshStandardMaterial color={color} roughness={0.35} />
+      ) : (
+        <meshBasicMaterial color={color} depthTest={false} depthWrite={false} />
+      )}
+    </mesh>
   );
 }
 
-export function DrawCanvas() {
+interface SceneProps {
+  strokes: StrokeInfo[];
+  liveStroke: LiveStrokeInfo | null;
+  /** The local artist's in-progress stroke (preview before commit). */
+  draft: number[] | null;
+  canDraw: boolean;
+  color: string;
+  width: number;
+  threeD: boolean;
+}
+
+/**
+ * Keep R3F's notion of the canvas size honest. R3F's built-in measurement
+ * watches an inner 100%-height div whose box can resolve wrong (and then
+ * never change) when flex layout settles after mount — the classic symptom
+ * was a squashed drawing on narrow layouts until a breakpoint crossing
+ * forced a relayout. Observing the wrapper (a definite, absolutely-positioned
+ * box) and pushing its size into the store sidesteps all of that.
+ */
+function SizeSync({ target }: { target: React.RefObject<HTMLDivElement | null> }) {
+  const setSize = useThree(s => s.setSize);
+  const get = useThree(s => s.get);
+  useEffect(() => {
+    const el = target.current;
+    if (!el) return;
+    const sync = () => {
+      const rect = el.getBoundingClientRect();
+      const { size } = get();
+      if (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        (Math.abs(rect.width - size.width) > 0.5 || Math.abs(rect.height - size.height) > 0.5)
+      ) {
+        setSize(rect.width, rect.height);
+      }
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [target, setSize, get]);
+  return null;
+}
+
+function Scene({ strokes, liveStroke, draft, canDraw, color, width, threeD }: SceneProps) {
+  const [paperW, paperH] = usePaperSize();
   return (
-    <Canvas
-      shadows
-      camera={{ position: [0, 4.2, 3.4], fov: 40 }}
-      onCreated={({ camera }) => camera.lookAt(0, 0, 0)}
+    <>
+      {/* only 3D strokes are lit (paper + flat ink use unlit materials);
+          intensities account for three's physical light units (÷π) */}
+      <ambientLight intensity={2} />
+      <directionalLight position={[3, 6, 2]} intensity={2.2} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[paperW, paperH]} />
+        {/* unlit — the paper reads as crisp white no matter the lighting */}
+        <meshBasicMaterial color="#ffffff" />
+      </mesh>
+      {strokes.map((s, i) => (
+        <InkStroke
+          key={s.id}
+          points={s.points}
+          color={s.color}
+          width={s.width}
+          threeD={s.threeD}
+          paperW={paperW}
+          paperH={paperH}
+          order={i}
+        />
+      ))}
+      {/* my in-progress stroke (artist preview) */}
+      {draft && draft.length >= 4 && (
+        <InkStroke
+          points={draft}
+          color={color}
+          width={width}
+          threeD={threeD}
+          paperW={paperW}
+          paperH={paperH}
+          order={strokes.length + 1}
+        />
+      )}
+      {/* the artist's in-flight stroke, streamed to everyone else */}
+      {!canDraw && liveStroke && liveStroke.points.length >= 4 && (
+        <InkStroke
+          points={liveStroke.points}
+          color={liveStroke.color}
+          width={liveStroke.width}
+          threeD={liveStroke.threeD}
+          paperW={paperW}
+          paperH={paperH}
+          order={strokes.length}
+        />
+      )}
+    </>
+  );
+}
+
+export interface DrawCanvasProps {
+  strokes: StrokeInfo[];
+  /** Someone else's in-progress stroke (ignored while you're the artist). */
+  liveStroke?: LiveStrokeInfo | null;
+  canDraw: boolean;
+  color: string;
+  /** Brush radius, normalized to paper width (server clamps 0.005–0.1). */
+  width: number;
+  /** Raised 3D relief for new strokes (artist tool toggle). */
+  threeD?: boolean;
+  onStrokeEnd: (points: number[]) => void;
+  /** Throttled snapshots of the growing stroke — drives the live share. */
+  onStrokeProgress?: (points: number[]) => void;
+}
+
+export function DrawCanvas({
+  strokes,
+  liveStroke = null,
+  canDraw,
+  color,
+  width,
+  threeD = false,
+  onStrokeEnd,
+  onStrokeProgress,
+}: DrawCanvasProps) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  // the in-progress stroke — ref for appending, state for rendering
+  const drawing = useRef<number[] | null>(null);
+  const lastProgressAt = useRef(0);
+  const [draft, setDraft] = useState<number[] | null>(null);
+
+  // dropping the brush mid-stroke (artist rotated away) shouldn't strand ink
+  useEffect(() => {
+    if (!canDraw) {
+      drawing.current = null;
+      setDraft(null);
+    }
+  }, [canDraw]);
+
+  function samplePoint(e: React.PointerEvent): [number, number] {
+    const rect = wrapRef.current!.getBoundingClientRect();
+    return [
+      THREE.MathUtils.clamp((e.clientX - rect.left) / rect.width, 0, 1),
+      THREE.MathUtils.clamp((e.clientY - rect.top) / rect.height, 0, 1),
+    ];
+  }
+
+  function handleDown(e: React.PointerEvent) {
+    if (!canDraw || e.button !== 0) return;
+    try {
+      wrapRef.current?.setPointerCapture(e.pointerId);
+    } catch {
+      // synthetic pointers (tests, some pens) can't be captured — draw anyway
+    }
+    drawing.current = [...samplePoint(e)];
+    setDraft(drawing.current.slice());
+  }
+
+  function handleMove(e: React.PointerEvent) {
+    const pts = drawing.current;
+    if (!pts || pts.length >= MAX_POINTS_PER_STROKE * 2) return;
+    const [x, y] = samplePoint(e);
+    const dx = x - pts[pts.length - 2];
+    const dy = y - pts[pts.length - 1];
+    if (Math.hypot(dx, dy) < MIN_SAMPLE_DIST) return;
+    pts.push(x, y);
+    setDraft(pts.slice());
+    const now = performance.now();
+    if (now - lastProgressAt.current >= PROGRESS_INTERVAL_MS) {
+      lastProgressAt.current = now;
+      onStrokeProgress?.(pts.slice());
+    }
+  }
+
+  function handleUp(e: React.PointerEvent) {
+    const pts = drawing.current;
+    drawing.current = null;
+    setDraft(null);
+    if (!pts) return;
+    try {
+      wrapRef.current?.releasePointerCapture(e.pointerId);
+    } catch {
+      /* never captured */
+    }
+    // a tap becomes a dot — give it a second point so the tube has a path
+    if (pts.length === 2) pts.push(pts[0] + MIN_SAMPLE_DIST, pts[1]);
+    onStrokeEnd(pts);
+  }
+
+  return (
+    <div
+      ref={wrapRef}
+      onPointerDown={handleDown}
+      onPointerMove={handleMove}
+      onPointerUp={handleUp}
+      onPointerCancel={handleUp}
+      style={{
+        // absolute against the (relative) host box: the wrapper's size is
+        // always definite, so R3F's resize observer tracks the real layout —
+        // percentage heights inside flex sections can measure wrong at mount
+        // and leave the canvas (and stroke coords) built for a stale box
+        position: 'absolute',
+        inset: 0,
+        touchAction: 'none',
+        cursor: canDraw ? 'crosshair' : 'default',
+      }}
     >
-      <color attach="background" args={['#f7f5f1']} />
-      <ambientLight intensity={0.9} />
-      <directionalLight position={[3, 6, 2]} intensity={1.4} castShadow />
-      <InkStroke />
-    </Canvas>
+      <Canvas
+        flat
+        camera={{ position: [0, CAM_HEIGHT, 0], fov: CAM_FOV, up: [0, 0, -1] }}
+        onCreated={({ camera }) => camera.lookAt(0, 0, 0)}
+      >
+        <color attach="background" args={['#f7f5f1']} />
+        <SizeSync target={wrapRef} />
+        <Scene
+          strokes={strokes}
+          liveStroke={liveStroke}
+          draft={draft}
+          canDraw={canDraw}
+          color={color}
+          width={width}
+          threeD={threeD}
+        />
+      </Canvas>
+    </div>
   );
 }

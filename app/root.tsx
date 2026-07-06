@@ -1,5 +1,5 @@
 import { ClerkProvider } from "@clerk/react-router";
-import { rootAuthLoader } from "@clerk/react-router/server";
+import { clerkMiddleware, rootAuthLoader } from "@clerk/react-router/server";
 import {
   isRouteErrorResponse,
   Links,
@@ -31,6 +31,12 @@ export const links: Route.LinksFunction = () => [
 const clerkConfigured = Boolean(
   import.meta.env.VITE_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY
 );
+
+// rootAuthLoader needs clerkMiddleware registered on the root route. Skip it
+// entirely while Clerk is unconfigured so the shell stays runnable.
+export const middleware: Route.MiddlewareFunction[] = clerkConfigured
+  ? [clerkMiddleware()]
+  : [];
 
 export async function loader(args: Route.LoaderArgs) {
   if (!clerkConfigured) return null;

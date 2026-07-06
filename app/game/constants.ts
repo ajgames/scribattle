@@ -10,7 +10,7 @@ export const MAX_USERNAME_LENGTH = 16;
 export const DEFAULTS = {
   maxPlayers: 8,
   rounds: 3,
-  turnSeconds: 90,
+  turnSeconds: 60, // hard max — server clamps to 60
 };
 
 export function generateRoomCode(): string {
