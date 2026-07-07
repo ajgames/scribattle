@@ -75,7 +75,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3025736277635211"
           crossOrigin="anonymous"
         />
-        {/* Google tag (gtag.js) — GA4 property G-YH4ETLGZCM */}
+        {/* Google tag (gtag.js) — one loader feeds both destinations:
+            GA4 property G-YH4ETLGZCM and Google Ads AW-18304297991 */}
         <script
           async
           src="https://www.googletagmanager.com/gtag/js?id=G-YH4ETLGZCM"
@@ -85,7 +86,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
             __html: `window.dataLayer = window.dataLayer || [];
 function gtag(){dataLayer.push(arguments);}
 gtag('js', new Date());
-gtag('config', 'G-YH4ETLGZCM');`,
+gtag('config', 'G-YH4ETLGZCM');
+gtag('config', 'AW-18304297991');`,
           }}
         />
         {/* End Google tag (gtag.js) */}
