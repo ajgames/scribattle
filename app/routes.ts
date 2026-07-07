@@ -8,9 +8,13 @@ export default [
   route("lobby/:code", "routes/lobby.tsx"),
   route("game/:code", "routes/game.tsx"),
   route("shop", "routes/shop.tsx"),
+  route("admin", "routes/admin.tsx"),
   route("sign-in/*", "routes/sign-in.tsx"),
   route("sign-up/*", "routes/sign-up.tsx"),
   route("api/profile", "routes/api.profile.ts"),
   route("api/referral/claim", "routes/api.referral.claim.ts"),
   route("api/shop/buy", "routes/api.shop.buy.ts"),
+  route("api/moderation/report", "routes/api.moderation.report.ts"),
+  route("api/moderation/status", "routes/api.moderation.status.ts"),
+  route("api/moderation/ack", "routes/api.moderation.ack.ts"),
 ] satisfies RouteConfig;

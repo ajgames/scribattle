@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 /**
  * Turso (persistent) schema — the durable side of the split:
@@ -53,4 +53,113 @@ export const unlocks = sqliteTable(
       .default(sql`(unixepoch())`),
   },
   t => [uniqueIndex('unlocks_user_item').on(t.userId, t.itemId)]
+);
+
+// ---------------------------------------------------------------------------
+// Moderation. Players are identified by their SpacetimeDB identity hex (the
+// anonymous "session id" persisted in their localStorage), not Clerk — anyone
+// can be reported, signed in or not. Escalation within a rolling window:
+// level 1 = warning modal, level 2 = removed from the game, level 3 = IP ban.
+// Constants (window/ban lengths, reasons) live in app/lib/moderation.ts.
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per offense (offender + game + turn) — multiple reports of the same
+ * drawing collapse into one warning instead of triple-striking the artist.
+ * `level` is fixed at creation from the offender's recent history.
+ */
+export const warnings = sqliteTable(
+  'warnings',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    /** SpacetimeDB identity hex of the reported player. */
+    offenderIdentity: text('offender_identity').notNull(),
+    gameCode: text('game_code').notNull(),
+    turn: integer('turn').notNull(),
+    reason: text('reason').notNull(), // 'profane-imagery' | 'drawing-words' | 'other'
+    /** 1 = warn, 2 = removed from game, 3 = IP banned. */
+    level: integer('level').notNull(),
+    /** Set when the offender's client has shown the notice. */
+    acknowledgedAt: integer('acknowledged_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  t => [
+    index('warnings_offender').on(t.offenderIdentity),
+    uniqueIndex('warnings_offense').on(t.offenderIdentity, t.gameCode, t.turn),
+  ]
+);
+
+/** Raw reports, all of them — the free-text details land here, per reporter. */
+export const reports = sqliteTable(
+  'reports',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    warningId: integer('warning_id')
+      .notNull()
+      .references(() => warnings.id),
+    reporterIdentity: text('reporter_identity').notNull(),
+    reason: text('reason').notNull(),
+    details: text('details').notNull().default(''),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  t => [uniqueIndex('reports_once_per_reporter').on(t.warningId, t.reporterIdentity)]
+);
+
+/**
+ * Admin evidence: the reporter's client-side view of the game at report time
+ * (room, players, the offending turn's strokes, recent guesses) as JSON.
+ */
+export const gameSnapshots = sqliteTable('game_snapshots', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  warningId: integer('warning_id')
+    .notNull()
+    .references(() => warnings.id),
+  gameCode: text('game_code').notNull(),
+  turn: integer('turn').notNull(),
+  data: text('data').notNull(), // JSON blob
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+/**
+ * identity → IP sightings, upserted every time a client polls moderation
+ * status. Gameplay goes through SpacetimeDB (we never see IPs there), so this
+ * is what lets a level-3 warning turn into an IP ban.
+ */
+export const identityIps = sqliteTable(
+  'identity_ips',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    identity: text('identity').notNull(),
+    ip: text('ip').notNull(),
+    lastSeenAt: integer('last_seen_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  t => [
+    uniqueIndex('identity_ips_pair').on(t.identity, t.ip),
+    index('identity_ips_identity').on(t.identity),
+  ]
+);
+
+/** Active bans — root.tsx checks the caller's IP on every document request. */
+export const ipBans = sqliteTable(
+  'ip_bans',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    ip: text('ip').notNull(),
+    /** The identity that earned the ban (for admin forensics). */
+    identity: text('identity').notNull(),
+    warningId: integer('warning_id').references(() => warnings.id),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  t => [index('ip_bans_ip').on(t.ip)]
 );

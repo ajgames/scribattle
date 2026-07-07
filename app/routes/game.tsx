@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { AdBreak } from '../components/AdBreak';
 import { ClientOnly } from '../components/ClientOnly';
+import { ModerationGuard } from '../components/ModerationGuard';
+import { ReportModal } from '../components/ReportModal';
 import { DrawCanvas } from '../game/three/DrawCanvas';
 import { hintedWordDisplay } from '../game/hints';
 import { loadStoredUsername } from '../game/names';
@@ -73,6 +75,7 @@ export default function Game({ params }: Route.ComponentProps) {
   const [fatBrush, setFatBrush] = useState(false);
   const [guessDraft, setGuessDraft] = useState('');
   const [guessError, setGuessError] = useState('');
+  const [reporting, setReporting] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
 
   // shop unlocks shape the easel: skin packs add inks, 'fat-cap' adds a
@@ -180,15 +183,36 @@ export default function Game({ params }: Route.ComponentProps) {
 
   if (finished) {
     // the ad break runs between the buzzer and the results; the 'ad-free'
-    // shop perk (and a rematch reset) skip straight through
+    // shop perk (and a rematch reset) skip straight through. The moderation
+    // guard rides along so warnings land even on the results screen.
     if (!adFree && !adWatched) {
-      return <AdBreak onDone={() => setAdWatched(true)} />;
+      return (
+        <>
+          <ModerationGuard />
+          <AdBreak onDone={() => setAdWatched(true)} />
+        </>
+      );
     }
-    return <GameOver code={code} />;
+    return (
+      <>
+        <ModerationGuard />
+        <GameOver code={code} />
+      </>
+    );
   }
 
   return (
     <main className="flex min-h-svh flex-col bg-[#f7f5f1] text-stone-900">
+      <ModerationGuard />
+      {reporting && playing && (
+        <ReportModal
+          offenderIdentity={room.artist}
+          offenderName={artistName}
+          gameCode={code}
+          turn={room.turn}
+          onClose={() => setReporting(false)}
+        />
+      )}
       {/* top bar: round/turn status, the word (masked for guessers), the clock */}
       <header className="flex items-center justify-between border-b border-stone-200 bg-white/70 px-5 py-3">
         <Link to="/" className="font-serif text-2xl tracking-tight">
@@ -219,6 +243,15 @@ export default function Game({ params }: Route.ComponentProps) {
           <span className="rounded-md border border-stone-200 bg-white px-2 py-1 font-mono text-xs tracking-[0.2em] text-stone-500">
             {code}
           </span>
+          {playing && !isArtist && (
+            <button
+              onClick={() => setReporting(true)}
+              title="report this drawing"
+              className="rounded-md border border-stone-200 bg-white px-2 py-1 text-xs text-stone-400 transition hover:border-red-300 hover:text-red-600"
+            >
+              ⚑
+            </button>
+          )}
         </div>
       </header>
 
