@@ -57,6 +57,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
           name="google-adsense-account"
           content="ca-pub-3025736277635211"
         />
+        {/* Google AdSense — loaded site-wide from the document head per
+            Google's implementation guide (support.google.com/adsense/answer/9274019) */}
+        <script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3025736277635211"
+          crossOrigin="anonymous"
+        />
         <Meta />
         <Links />
       </head>
