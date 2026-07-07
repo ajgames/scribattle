@@ -35,26 +35,89 @@ const MIN_GUESSER_POINTS = 20;
 const ARTIST_POINTS = 25;
 
 /** Hard ceiling on the turn clock — rooms can be faster, never slower. */
-const MAX_TURN_SECONDS = 60;
+const MAX_TURN_SECONDS = 45;
 const DEFAULT_ROUNDS = 3;
 // clients fire end_turn when their countdown hits zero; absorb clock jitter
 const END_TURN_GRACE_MICROS = 500_000n;
 
+// each turn opens with the artist picking one of N words; if they dawdle
+// past the window, any client pokes auto_pick_word (same trust model as
+// end_turn). Keep in sync with app/game/constants.ts.
+const WORD_CHOICE_COUNT = 3;
+const WORD_CHOICE_SECONDS = 10;
+
 const VOTE_CATEGORIES = ['funny', 'artistic', 'horrible'] as const;
 
-// placeholder list — moves to a curated pack (with difficulty tiers) later
+// curated drawable-noun pack — flat difficulty for now (tiers later)
 const WORDS = [
-  'apple', 'banana', 'bicycle', 'bridge', 'butterfly', 'cactus', 'camera',
-  'candle', 'castle', 'caterpillar', 'church', 'cloud', 'crab', 'crown',
-  'dinosaur', 'dolphin', 'dragon', 'drum', 'elephant', 'envelope', 'firetruck',
-  'flashlight', 'flower', 'giraffe', 'guitar', 'hamburger', 'helicopter',
-  'igloo', 'island', 'jellyfish', 'kangaroo', 'keyboard', 'lighthouse',
-  'lightning', 'mermaid', 'microphone', 'mountain', 'mushroom', 'octopus',
-  'owl', 'palm tree', 'pancake', 'penguin', 'piano', 'pirate', 'pizza',
-  'pyramid', 'rainbow', 'robot', 'rocket', 'sandwich', 'scissors', 'shark',
-  'skateboard', 'snowman', 'spider', 'submarine', 'sunflower', 'telescope',
-  'tornado', 'tractor', 'treasure', 'umbrella', 'unicorn', 'volcano', 'whale',
-  'windmill', 'wizard',
+  'acorn', 'airplane', 'alarm clock', 'alligator', 'ambulance', 'anchor',
+  'angel', 'ant', 'apple', 'aquarium', 'arrow', 'astronaut', 'avocado',
+  'backpack', 'bagel', 'balloon', 'banana', 'barn', 'baseball', 'basketball',
+  'bat', 'bathtub', 'beach', 'bear', 'beaver', 'bee', 'beehive', 'bell',
+  'belt', 'bench', 'bicycle', 'binoculars', 'birdhouse', 'birthday cake',
+  'blanket', 'boat', 'bone', 'book', 'bookshelf', 'boomerang', 'boot',
+  'bowtie', 'bracelet', 'brain', 'bridge', 'broccoli', 'broom', 'bubble',
+  'bulldozer', 'bus', 'butterfly', 'cabin', 'cactus', 'cake', 'calculator',
+  'calendar', 'camel', 'camera', 'campfire', 'candle', 'canoe', 'cape',
+  'car', 'carousel', 'carrot', 'castle', 'cat', 'caterpillar', 'cave',
+  'cello', 'chair', 'chandelier', 'cheese', 'cheetah', 'cherry', 'chicken',
+  'chimney', 'chocolate', 'church', 'clock', 'cloud', 'coconut', 'comb',
+  'comet', 'compass', 'computer', 'cookie', 'coral', 'corn', 'couch', 'cow',
+  'cowboy', 'crab', 'crayon', 'crocodile', 'crown', 'cruise ship', 'cupcake',
+  'curtain', 'deer', 'desert', 'desk', 'diamond', 'dice', 'dinosaur', 'dog',
+  'dolphin', 'donut', 'door', 'dragon', 'dragonfly', 'dresser', 'drill',
+  'drum', 'duck', 'eagle', 'ear', 'earth', 'easel', 'eel', 'egg', 'elephant',
+  'elf', 'envelope', 'eraser', 'eye', 'falcon', 'fan', 'farm', 'feather',
+  'fence', 'fern', 'ferris wheel', 'fire', 'fireplace', 'firetruck',
+  'fireworks', 'fish', 'fishing rod', 'flag', 'flamingo', 'flashlight',
+  'flip flops', 'flower', 'football', 'forest', 'fork', 'fountain', 'fox',
+  'frog', 'frying pan', 'galaxy', 'garden', 'gate', 'ghost', 'gift',
+  'gingerbread man', 'giraffe', 'glacier', 'glasses', 'globe', 'glove',
+  'goat', 'goggles', 'goldfish', 'gorilla', 'grapes', 'grasshopper',
+  'greenhouse', 'guitar', 'hamburger', 'hammer', 'hammock', 'hamster',
+  'harp', 'hat', 'haystack', 'headphones', 'hedgehog', 'helicopter',
+  'helmet', 'hippo', 'honey', 'horse', 'hot air balloon', 'hot dog',
+  'hourglass', 'house', 'ice cream', 'ice skate', 'iceberg', 'igloo',
+  'iguana', 'island', 'jacket', 'jar', 'jellyfish',
+  'jet ski', 'juggler', 'jungle', 'kangaroo', 'kayak', 'kettle', 'key',
+  'keyboard', 'kite', 'kitten', 'knight', 'koala', 'ladder', 'ladybug',
+  'lamp', 'lantern', 'laptop', 'lasso', 'lawnmower', 'leaf', 'lemon',
+  'leopard', 'lighthouse', 'lightning', 'lion', 'lizard', 'llama', 'lobster',
+  'lock', 'lollipop', 'magician', 'magnet', 'magnifying glass', 'mailbox',
+  'mango', 'map', 'maze', 'mermaid', 'meteor', 'microphone', 'microscope',
+  'milkshake', 'mitten', 'monkey', 'moon', 'moose', 'mosquito', 'moth',
+  'motorcycle', 'mountain', 'mouse', 'mummy', 'mushroom', 'mustache',
+  'narwhal',
+  'necklace', 'nest', 'net', 'newspaper', 'ninja', 'noodles', 'nose',
+  'ocean', 'octopus', 'orange', 'ostrich', 'otter', 'oven', 'owl',
+  'paintbrush', 'palette', 'palm tree', 'pancake', 'panda', 'paper airplane',
+  'parachute', 'parrot', 'peacock', 'peanut', 'pear', 'pelican', 'pencil',
+  'penguin', 'piano', 'pig', 'pigeon', 'pillow', 'pineapple', 'pinwheel',
+  'pirate', 'pizza', 'planet', 'playground', 'pogo stick', 'polar bear',
+  'popcorn', 'popsicle', 'porcupine', 'postcard', 'potato', 'pretzel',
+  'princess', 'pumpkin', 'puppet', 'puzzle', 'pyramid', 'quilt', 'rabbit',
+  'raccoon', 'radio', 'raft', 'rainbow', 'rake', 'refrigerator', 'reindeer',
+  'rhinoceros', 'ring', 'river', 'robot', 'rocket', 'roller coaster',
+  'rooster', 'rope', 'rose', 'rowboat', 'rug', 'ruler', 'sailboat', 'salad',
+  'sandcastle', 'sandwich', 'satellite', 'saxophone', 'scarecrow', 'scarf',
+  'school bus', 'scissors', 'scooter', 'scorpion', 'seagull', 'seahorse',
+  'seal', 'seashell', 'seesaw', 'shark', 'sheep', 'shield', 'ship', 'shoe',
+  'shovel', 'shower', 'skateboard', 'skeleton', 'ski', 'skunk', 'skyscraper',
+  'sled', 'sloth', 'snail', 'snake', 'snorkel', 'snowflake', 'snowman',
+  'soccer ball', 'sock', 'spaceship', 'spaghetti', 'spider', 'spoon',
+  'squid', 'squirrel', 'stapler', 'starfish', 'statue', 'stethoscope',
+  'stingray', 'stop sign', 'strawberry', 'submarine', 'suitcase', 'sun',
+  'sunflower', 'surfboard', 'sushi', 'swan', 'sweater', 'swing', 'sword',
+  'taco', 'tambourine', 'teapot', 'teddy bear', 'telescope', 'tent', 'tiger',
+  'toaster', 'toothbrush', 'toothpaste', 'top hat', 'torch', 'tornado',
+  'toucan', 'tower', 'tractor', 'traffic light', 'train', 'trampoline',
+  'treasure', 'treehouse', 'tricycle', 'trombone', 'trophy', 'trumpet',
+  'tugboat', 'turtle', 'typewriter', 'ufo', 'umbrella', 'unicorn', 'vacuum',
+  'vampire', 'vase', 'violin', 'volcano', 'vulture', 'waffle', 'wagon',
+  'walrus', 'wand', 'washing machine', 'watch', 'waterfall', 'watermelon',
+  'well', 'werewolf', 'whale', 'wheel', 'wheelbarrow', 'windmill', 'window',
+  'witch', 'wizard', 'wolf', 'worm', 'wreath', 'wrench', 'xylophone',
+  'yacht', 'yarn', 'zebra', 'zipper', 'zoo',
 ] as const;
 
 const game = table(
@@ -175,7 +238,30 @@ const guess = table(
   }
 );
 
-const spacetimedb = schema({ game, player, stroke, liveStroke, drawing, vote, guess });
+/**
+ * The artist's word options — one row per room, present only while the
+ * pick-a-word window is open (currentWord '' and turnStartedAt timing the
+ * window). Lives in its own table (not a game column) so adding it was a
+ * non-breaking migration; same public-readability caveat as currentWord.
+ */
+const wordChoice = table(
+  { name: 'word_choice', public: true },
+  {
+    gameCode: t.string().primaryKey(),
+    choices: t.array(t.string()),
+  }
+);
+
+const spacetimedb = schema({
+  game,
+  player,
+  stroke,
+  liveStroke,
+  drawing,
+  vote,
+  guess,
+  wordChoice,
+});
 
 function randomCode(ctx: { random(): number }): string {
   let code = '';
@@ -185,8 +271,10 @@ function randomCode(ctx: { random(): number }): string {
   return code;
 }
 
-function randomWord(ctx: { random(): number }): string {
-  return WORDS[Math.floor(ctx.random() * WORDS.length)];
+function randomWordChoices(ctx: { random(): number }, count: number): string[] {
+  const picks = new Set<number>();
+  while (picks.size < count) picks.add(Math.floor(ctx.random() * WORDS.length));
+  return [...picks].map(i => WORDS[i]);
 }
 
 function cleanUsername(raw: string): string {
@@ -217,30 +305,52 @@ function deleteGameArtifacts(ctx: Ctx, code: string) {
   ctx.db.drawing.gameCode.delete(code);
   ctx.db.vote.gameCode.delete(code);
   ctx.db.liveStroke.gameCode.delete(code);
+  ctx.db.wordChoice.gameCode.delete(code);
 }
 
-/** Point the room at a new artist/word/turn and log the drawing for the slideshow. */
+/**
+ * Point the room at a new artist/turn and open the pick-a-word window: the
+ * artist gets WORD_CHOICE_COUNT options, `currentWord` stays '' and
+ * `turnStartedAt` times the choice window. The draw clock (and the slideshow
+ * drawing row) start in `lockWord` once a word is picked.
+ */
 function beginTurn(ctx: Ctx, room: GameRow, artist: PlayerRow, turn: number, round: number): GameRow {
   ctx.db.liveStroke.gameCode.delete(room.code);
-  const word = randomWord(ctx);
-  ctx.db.drawing.insert({
-    id: 0n,
-    gameCode: room.code,
-    turn,
-    artist: artist.identity,
-    artistName: artist.username,
-    word,
-  });
+  const choices = { gameCode: room.code, choices: randomWordChoices(ctx, WORD_CHOICE_COUNT) };
+  if (ctx.db.wordChoice.gameCode.find(room.code)) {
+    ctx.db.wordChoice.gameCode.update(choices);
+  } else {
+    ctx.db.wordChoice.insert(choices);
+  }
   const updated = {
     ...room,
     artist: artist.identity,
-    currentWord: word,
+    currentWord: '',
     turn,
     round,
     turnStartedAt: ctx.timestamp,
   };
   ctx.db.game.code.update(updated);
   return updated;
+}
+
+/** Lock in the turn's word: log the slideshow row and start the draw clock. */
+function lockWord(ctx: Ctx, room: GameRow, word: string): void {
+  ctx.db.wordChoice.gameCode.delete(room.code);
+  const artist = ctx.db.player.identity.find(room.artist);
+  ctx.db.drawing.insert({
+    id: 0n,
+    gameCode: room.code,
+    turn: room.turn,
+    artist: room.artist,
+    artistName: artist?.username ?? '',
+    word,
+  });
+  ctx.db.game.code.update({
+    ...room,
+    currentWord: word,
+    turnStartedAt: ctx.timestamp,
+  });
 }
 
 /**
@@ -258,6 +368,7 @@ function advanceTurn(ctx: Ctx, room: GameRow): GameRow {
 
   if (round > room.rounds) {
     ctx.db.liveStroke.gameCode.delete(room.code);
+    ctx.db.wordChoice.gameCode.delete(room.code);
     const finished = { ...room, status: 'finished', currentWord: '', turnStartedAt: ctx.timestamp };
     ctx.db.game.code.update(finished);
     return finished;
@@ -471,10 +582,44 @@ export const clearCanvas = spacetimedb.reducer(ctx => {
   ctx.db.liveStroke.gameCode.delete(room.code);
 });
 
+/** The artist picks one of their word options while the choice window is open. */
+export const chooseWord = spacetimedb.reducer({ index: t.u32() }, (ctx, { index }) => {
+  const me = ctx.db.player.identity.find(ctx.sender);
+  if (!me) throw new SenderError('You are not in a game');
+  const room = ctx.db.game.code.find(me.gameCode);
+  if (!room || room.status !== 'playing') throw new SenderError('The game is not running');
+  if (!ctx.sender.isEqual(room.artist)) throw new SenderError('Only the artist picks the word');
+  const pending = ctx.db.wordChoice.gameCode.find(room.code);
+  if (!pending) return; // already locked — double-click
+  if (index >= pending.choices.length) throw new SenderError('Bad word choice');
+  lockWord(ctx, room, pending.choices[index]);
+});
+
+/**
+ * A dawdling artist gets a word picked for them: any client whose choice
+ * countdown hit zero calls this (same trust model as end_turn — the server's
+ * clock decides, racing clients lock the word once).
+ */
+export const autoPickWord = spacetimedb.reducer(ctx => {
+  const me = ctx.db.player.identity.find(ctx.sender);
+  if (!me) return;
+  const room = ctx.db.game.code.find(me.gameCode);
+  if (!room || room.status !== 'playing') return;
+  const pending = ctx.db.wordChoice.gameCode.find(room.code);
+  if (!pending) return;
+
+  const elapsed = ctx.timestamp.since(room.turnStartedAt).micros;
+  const limit = BigInt(WORD_CHOICE_SECONDS) * 1_000_000n - END_TURN_GRACE_MICROS;
+  if (elapsed < limit) return;
+  lockWord(ctx, room, pending.choices[Math.floor(ctx.random() * pending.choices.length)]);
+});
+
 /**
  * Any client whose countdown hit zero calls this; the server checks the turn
  * clock against its own timestamps, so early/spoofed calls are quiet no-ops
- * and racing clients only rotate the turn once.
+ * and racing clients only rotate the turn once. While the pick-a-word window
+ * is open `turnStartedAt` marks the window start instead, so this doubles as
+ * a stuck-room failsafe (a full turnSeconds after an unpicked word).
  */
 export const endTurn = spacetimedb.reducer(ctx => {
   const me = ctx.db.player.identity.find(ctx.sender);
@@ -540,12 +685,16 @@ export const submitGuess = spacetimedb.reducer({ text: t.string() }, (ctx, { tex
     ctx.db.player.identity.update({ ...artist, score: artist.score + ARTIST_POINTS });
   }
 
-  // everyone (besides the artist) solved it → next turn
+  // every connected guesser solved it → next turn. Offline players don't
+  // count — an AFK tab shouldn't make everyone wait out the clock (they can
+  // still solve for points if they reconnect before it runs down naturally).
   const solved = new Set(
     turnGuesses.filter(g => g.correct).map(g => g.player.toHexString())
   );
   solved.add(ctx.sender.toHexString());
-  const guessers = playersIn(ctx, room.code).filter(p => !p.identity.isEqual(room.artist));
+  const guessers = playersIn(ctx, room.code).filter(
+    p => p.online && !p.identity.isEqual(room.artist)
+  );
   if (guessers.every(p => solved.has(p.identity.toHexString()))) {
     advanceTurn(ctx, room);
   }
@@ -617,7 +766,26 @@ export const onConnect = spacetimedb.clientConnected(ctx => {
 
 export const onDisconnect = spacetimedb.clientDisconnected(ctx => {
   const me = ctx.db.player.identity.find(ctx.sender);
-  if (me && me.online) ctx.db.player.identity.update({ ...me, online: false });
+  if (!me || !me.online) return;
+  ctx.db.player.identity.update({ ...me, online: false });
+
+  // if everyone still connected already solved the word, the leaver was the
+  // only thing keeping the turn alive — rotate now instead of waiting out the
+  // clock. (The artist leaving is different: the turn stays so they can
+  // reconnect and keep drawing.)
+  const room = ctx.db.game.code.find(me.gameCode);
+  if (!room || room.status !== 'playing' || ctx.sender.isEqual(room.artist)) return;
+  const solved = new Set(
+    [...ctx.db.guess.gameCode.filter(room.code)]
+      .filter(g => g.turn === room.turn && g.correct)
+      .map(g => g.player.toHexString())
+  );
+  const guessers = playersIn(ctx, room.code).filter(
+    p => p.online && !p.identity.isEqual(room.artist) && !p.identity.isEqual(ctx.sender)
+  );
+  if (guessers.length > 0 && guessers.every(p => solved.has(p.identity.toHexString()))) {
+    advanceTurn(ctx, room);
+  }
 });
 
 export default spacetimedb;

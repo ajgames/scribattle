@@ -29,6 +29,8 @@ export interface RoomInfo {
   artist: string;
   /** The secret word — '' unless playing. Only render it for the artist. */
   currentWord: string;
+  /** Artist's word options — non-empty while the pick-a-word window is open. */
+  wordChoices: string[];
   turn: number;
   /** 1-based round (everyone draws once per round). 0 while waiting. */
   round: number;

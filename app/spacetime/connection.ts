@@ -131,6 +131,7 @@ function doConnect(token: string | undefined): Promise<DbConnection> {
             'SELECT * FROM drawing',
             'SELECT * FROM vote',
             'SELECT * FROM guess',
+            'SELECT * FROM word_choice',
           ]);
       })
       .onConnectError((_ctx, err) => {
@@ -176,6 +177,7 @@ function registerRowCallbacks(connection: DbConnection) {
     connection.db.drawing,
     connection.db.vote,
     connection.db.guess,
+    connection.db.wordChoice,
   ] as const) {
     tbl.onInsert(scheduleSync);
     tbl.onDelete(scheduleSync);
@@ -183,6 +185,7 @@ function registerRowCallbacks(connection: DbConnection) {
   connection.db.game.onUpdate(scheduleSync);
   connection.db.player.onUpdate(scheduleSync);
   connection.db.liveStroke.onUpdate(scheduleSync);
+  connection.db.wordChoice.onUpdate(scheduleSync);
 }
 
 let syncScheduled = false;
@@ -244,6 +247,7 @@ function sync() {
         turnSeconds: gameRow.turnSeconds,
         artist: gameRow.artist.toHexString(),
         currentWord: gameRow.currentWord,
+        wordChoices: conn.db.wordChoice.gameCode.find(code)?.choices ?? [],
         turn: gameRow.turn,
         round: gameRow.round,
         turnStartedAtMs: Number(gameRow.turnStartedAt.microsSinceUnixEpoch / 1000n),
@@ -406,6 +410,17 @@ export function sendLiveStroke(
  */
 export function endTurn(): void {
   conn?.reducers.endTurn({}).catch(() => {});
+}
+
+/** Artist locks in one of their word options. */
+export async function chooseWord(index: number): Promise<void> {
+  const c = await connect();
+  await c.reducers.chooseWord({ index });
+}
+
+/** Choice window ran out — poke the server to pick for the artist (endTurn-style no-op if early). */
+export function autoPickWord(): void {
+  conn?.reducers.autoPickWord({}).catch(() => {});
 }
 
 /** Slideshow ballot — one pick per category; same pick again retracts it. */

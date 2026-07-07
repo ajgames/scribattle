@@ -7,7 +7,9 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import AddStrokeReducer from "../add_stroke_reducer";
+import AutoPickWordReducer from "../auto_pick_word_reducer";
 import CastVoteReducer from "../cast_vote_reducer";
+import ChooseWordReducer from "../choose_word_reducer";
 import ClearCanvasReducer from "../clear_canvas_reducer";
 import CreateGameReducer from "../create_game_reducer";
 import EndTurnReducer from "../end_turn_reducer";
@@ -19,7 +21,9 @@ import SubmitGuessReducer from "../submit_guess_reducer";
 import UpdateLiveStrokeReducer from "../update_live_stroke_reducer";
 
 export type AddStrokeParams = __Infer<typeof AddStrokeReducer>;
+export type AutoPickWordParams = __Infer<typeof AutoPickWordReducer>;
 export type CastVoteParams = __Infer<typeof CastVoteReducer>;
+export type ChooseWordParams = __Infer<typeof ChooseWordReducer>;
 export type ClearCanvasParams = __Infer<typeof ClearCanvasReducer>;
 export type CreateGameParams = __Infer<typeof CreateGameReducer>;
 export type EndTurnParams = __Infer<typeof EndTurnReducer>;

@@ -10,8 +10,11 @@ export const MAX_USERNAME_LENGTH = 16;
 export const DEFAULTS = {
   maxPlayers: 8,
   rounds: 3,
-  turnSeconds: 60, // hard max — server clamps to 60
+  turnSeconds: 45, // hard max — server clamps to 45
 };
+
+/** Seconds the artist gets to pick a word before the server accepts an auto-pick poke. */
+export const WORD_CHOICE_SECONDS = 10;
 
 export function generateRoomCode(): string {
   let code = "";

@@ -8,11 +8,14 @@ import { DrawCanvas } from '../game/three/DrawCanvas';
 import { hintedWordDisplay } from '../game/hints';
 import { loadStoredUsername } from '../game/names';
 import { useGameStore, type VoteCategory } from '../game/store';
+import { useGameSounds } from '../game/useGameSounds';
 import { AD_FREE_ITEM_ID, REFERRAL_REWARD, SHOP_ITEMS } from '../lib/catalog';
 import { useProfileStore } from '../lib/profile';
 import { referralLink } from '../lib/referral';
 import {
+  autoPickWord,
   castVote,
+  chooseWord,
   clearCanvas,
   endTurn,
   ensureInGame,
@@ -22,6 +25,7 @@ import {
   sendStroke,
   submitGuess,
 } from '../spacetime/connection';
+import { WORD_CHOICE_SECONDS } from '../game/constants';
 import { pageMeta } from '../lib/seo';
 import type { Route } from './+types/game';
 
@@ -33,6 +37,10 @@ export function meta({ params }: Route.MetaArgs) {
 const PALETTE = ['#1c1917', '#dc2626', '#2563eb', '#16a34a', '#d97706'];
 const BRUSH_WIDTH = 0.007; // normalized to paper width, matches server clamps
 const FAT_BRUSH_WIDTH = 0.016; // 'fat-cap' shop unlock — still inside server clamps
+// the eraser is just paper-colored ink (see DrawCanvas's paper material) —
+// a wide flat stroke that paints sections away for everyone, replays included
+const PAPER_COLOR = '#ffffff';
+const ERASER_WIDTH = 0.022;
 
 const VOTE_BUTTONS: { category: VoteCategory; emoji: string; label: string }[] = [
   { category: 'funny', emoji: '😂', label: 'funny' },
@@ -75,6 +83,7 @@ export default function Game({ params }: Route.ComponentProps) {
   const [color, setColor] = useState(PALETTE[0]);
   const [threeD, setThreeD] = useState(false);
   const [fatBrush, setFatBrush] = useState(false);
+  const [eraser, setEraser] = useState(false);
   const [guessDraft, setGuessDraft] = useState('');
   const [guessError, setGuessError] = useState('');
   const [reporting, setReporting] = useState(false);
@@ -94,11 +103,27 @@ export default function Game({ params }: Route.ComponentProps) {
   );
   const hasFatCap = unlockIds.includes('fat-cap');
   const adFree = unlockIds.includes(AD_FREE_ITEM_ID);
-  const brushWidth = hasFatCap && fatBrush ? FAT_BRUSH_WIDTH : BRUSH_WIDTH;
+  // the eraser overrides the ink: paper-colored, wide, and always flat (a
+  // raised 3D "erase" would cast shadows over the drawing)
+  const brushWidth = eraser
+    ? ERASER_WIDTH
+    : hasFatCap && fatBrush
+      ? FAT_BRUSH_WIDTH
+      : BRUSH_WIDTH;
+  const brushColor = eraser ? PAPER_COLOR : color;
+  const brushThreeD = !eraser && threeD;
 
-  // one ad break per match end — reset when the room leaves 'finished'
-  // (rematch) so the next match gets its own break
-  const [adWatched, setAdWatched] = useState(false);
+  // one ad break per match end. The flag rides sessionStorage so refreshing
+  // the results screen doesn't replay the break; any live non-finished status
+  // (rematch, next match) clears it so the next match gets its own break.
+  const adKey = `scribattle:ad-watched:${code}`;
+  const [adWatched, setAdWatched] = useState(
+    () => typeof window !== 'undefined' && sessionStorage.getItem(adKey) === '1'
+  );
+  function markAdWatched() {
+    sessionStorage.setItem(adKey, '1');
+    setAdWatched(true);
+  }
 
   // same refresh recovery as the lobby: persisted identity re-attaches to its
   // player row; a nameless direct visit goes to the menu with the code prefilled
@@ -128,23 +153,56 @@ export default function Game({ params }: Route.ComponentProps) {
   const playing = inRoom && room?.status === 'playing';
   const finished = inRoom && room?.status === 'finished';
 
+  const roomStatus = inRoom ? room?.status : undefined;
   useEffect(() => {
-    if (!finished) setAdWatched(false);
-  }, [finished]);
+    // only a synced, non-finished room clears the flag — before the mirror
+    // catches up `finished` is false and clearing then would replay the ad
+    if (roomStatus && roomStatus !== 'finished') {
+      setAdWatched(false);
+      sessionStorage.removeItem(adKey);
+    }
+  }, [roomStatus, adKey]);
   const isArtist = !!playing && room.artist === identity;
   const artistName = players.find(p => p.isArtist)?.username ?? '…';
+  // the turn opens with the artist picking one of three words — the draw
+  // clock (turnStartedAt) only starts once the word locks in
+  const wordChoices = playing ? room.wordChoices : [];
+  const choosing = wordChoices.length > 0;
   const guessedThisTurn =
     !!playing &&
     guesses.some(g => g.correct && g.playerId === identity && g.turn === room.turn);
-  const canGuess = !!playing && !isArtist && !guessedThisTurn;
+  const canGuess = !!playing && !choosing && !isArtist && !guessedThisTurn;
 
-  const secondsLeft = useTurnCountdown(playing ? room.turnStartedAtMs : null, room?.turnSeconds ?? 60);
+  const secondsLeft = useTurnCountdown(
+    playing && !choosing ? room.turnStartedAtMs : null,
+    room?.turnSeconds ?? 45
+  );
+  const chooseSecondsLeft = useTurnCountdown(
+    playing && choosing ? room.turnStartedAtMs : null,
+    WORD_CHOICE_SECONDS
+  );
+
+  useGameSounds(playing ? secondsLeft : null);
+
+  // choice window expired — poke the server to pick for the artist (all
+  // clients race; the server's clock decides, duplicates are no-ops)
+  const lastPickPoke = useRef(0);
+  useEffect(() => {
+    if (!choosing || chooseSecondsLeft == null || chooseSecondsLeft > 0) return;
+    const t = Date.now();
+    if (t - lastPickPoke.current < 2000) return;
+    lastPickPoke.current = t;
+    autoPickWord();
+  }, [choosing, chooseSecondsLeft]);
 
   // the canvas shows only the turn being painted — older turns are history
   const turnStrokes = useMemo(
     () => (playing ? strokes.filter(s => s.turn === room.turn) : []),
     [strokes, playing, room?.turn]
   );
+
+  // scoreboard ranks by score; sort is stable so ties keep join order
+  const ranked = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
 
   // when the clock runs out, poke the server (all clients race; the server's
   // own clock decides, so early pokes and duplicates are quiet no-ops)
@@ -191,7 +249,7 @@ export default function Game({ params }: Route.ComponentProps) {
       return (
         <>
           <ModerationGuard />
-          <AdBreak onDone={() => setAdWatched(true)} />
+          <AdBreak onDone={markAdWatched} />
         </>
       );
     }
@@ -204,7 +262,11 @@ export default function Game({ params }: Route.ComponentProps) {
   }
 
   return (
-    <main className="flex min-h-svh flex-col bg-[#f7f5f1] text-stone-900">
+    // the whole screen is viewport-locked (dvh tracks mobile browser chrome
+    // and the keyboard): the guess feed scrolls inside its panel and the
+    // input stays pinned, instead of chat growing the page and pushing the
+    // submit box out of view
+    <main className="flex h-dvh flex-col bg-[#f7f5f1] text-stone-900">
       <ModerationGuard />
       {reporting && playing && (
         <ReportModal
@@ -216,14 +278,14 @@ export default function Game({ params }: Route.ComponentProps) {
         />
       )}
       {/* top bar: round/turn status, the word (masked for guessers), the clock */}
-      <header className="flex items-center justify-between border-b border-stone-200 bg-white/70 px-5 py-3">
+      <header className="flex items-center justify-between border-b border-stone-200 bg-white/70 px-3 py-2 lg:px-5 lg:py-3">
         <Link to="/" className="font-serif text-2xl tracking-tight">
           Scri<span className="italic text-stone-500">battle</span>
         </Link>
         <div className="text-center">
           <p className="text-xs uppercase tracking-widest text-stone-400">
             {playing
-              ? `Round ${room.round}/${room.rounds} — ${artistName} is drawing`
+              ? `Round ${room.round}/${room.rounds} — ${artistName} is ${choosing ? 'picking a word' : 'drawing'}`
               : 'waiting…'}
           </p>
           <p className="whitespace-pre font-mono text-sm tracking-widest text-stone-600">
@@ -257,15 +319,18 @@ export default function Game({ params }: Route.ComponentProps) {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:flex-row">
-        {/* scoreboard — live mirror of the player table */}
-        <aside className="rounded-xl border border-stone-200 bg-white/70 p-4 lg:w-56">
-          <h2 className="text-xs font-medium uppercase tracking-widest text-stone-400">Players</h2>
-          <ul className="mt-3 space-y-2 text-sm">
-            {players.map(p => (
+      <div className="flex min-h-0 flex-1 flex-col gap-2 p-2 lg:flex-row lg:gap-3 lg:p-3">
+        {/* scoreboard — vertical panel on desktop, swipeable chip strip on
+            phones so it doesn't eat canvas height */}
+        <aside className="shrink-0 rounded-xl border border-stone-200 bg-white/70 p-2 lg:w-56 lg:p-4">
+          <h2 className="hidden text-xs font-medium uppercase tracking-widest text-stone-400 lg:block">
+            Players
+          </h2>
+          <ul className="flex gap-2 overflow-x-auto text-sm lg:mt-3 lg:flex-col lg:gap-0 lg:space-y-2 lg:overflow-visible">
+            {ranked.map(p => (
               <li
                 key={p.id}
-                className={`flex items-center justify-between ${p.online ? '' : 'opacity-40'}`}
+                className={`flex shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-full border border-stone-200 bg-white px-3 py-1 lg:gap-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 ${p.online ? '' : 'opacity-40'}`}
               >
                 <span className="font-medium">
                   {p.username}
@@ -282,7 +347,9 @@ export default function Game({ params }: Route.ComponentProps) {
         </aside>
 
         {/* drawing surface — R3F canvas (WebGL, client-only) */}
-        <section className="relative min-h-[50svh] flex-1 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+        {/* min-h-0 lets the canvas give ground to the feed/keyboard on
+            phones instead of forcing the page to scroll */}
+        <section className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
           <ClientOnly
             fallback={<div className="flex h-full items-center justify-center text-sm text-stone-400">warming up the easel…</div>}
           >
@@ -290,35 +357,81 @@ export default function Game({ params }: Route.ComponentProps) {
               strokes={turnStrokes}
               liveStroke={liveStroke}
               canDraw={isArtist}
-              color={color}
+              color={brushColor}
               width={brushWidth}
-              threeD={threeD}
+              threeD={brushThreeD}
               onStrokeProgress={points => {
-                sendLiveStroke(points, color, brushWidth, threeD);
+                sendLiveStroke(points, brushColor, brushWidth, brushThreeD);
               }}
               onStrokeEnd={points => {
-                sendStroke(points, color, brushWidth, threeD).catch(() => {
+                sendStroke(points, brushColor, brushWidth, brushThreeD).catch(() => {
                   // rejected stroke (turn rotated mid-draw) just never appears
                 });
               }}
             />
           </ClientOnly>
 
+          {/* pick-a-word window: the artist chooses, everyone else watches
+              the same countdown; at zero any client pokes autoPickWord */}
+          {choosing && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-white/85 p-4 backdrop-blur-sm">
+              {isArtist ? (
+                <>
+                  <p className="text-xs font-medium uppercase tracking-widest text-stone-400">
+                    pick your word — {chooseSecondsLeft ?? WORD_CHOICE_SECONDS}
+                  </p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    {wordChoices.map((w, i) => (
+                      <button
+                        key={w}
+                        onClick={() => chooseWord(i).catch(() => {})}
+                        className="rounded-lg border border-stone-300 bg-white px-5 py-2.5 font-serif text-lg tracking-tight text-stone-800 shadow-sm transition hover:border-stone-900 hover:text-stone-900"
+                      >
+                        {w}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-stone-500">
+                  {artistName} is picking a word…{' '}
+                  <span className="font-mono tabular-nums">
+                    {chooseSecondsLeft ?? WORD_CHOICE_SECONDS}
+                  </span>
+                </p>
+              )}
+            </div>
+          )}
+
           {isArtist ? (
-            <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-stone-200 bg-white/90 px-4 py-2 shadow-sm">
+            <div className="absolute bottom-3 left-1/2 flex max-w-[calc(100%-1rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-full border border-stone-200 bg-white/90 px-4 py-2 shadow-sm">
               {palette.map(c => (
                 <button
                   key={c}
-                  onClick={() => setColor(c)}
+                  onClick={() => {
+                    setColor(c);
+                    setEraser(false);
+                  }}
                   aria-label={`brush color ${c}`}
                   className={`size-5 rounded-full border transition ${
-                    color === c
+                    color === c && !eraser
                       ? 'scale-125 border-stone-900'
                       : 'border-stone-200 hover:scale-110'
                   }`}
                   style={{ backgroundColor: c }}
                 />
               ))}
+              <button
+                onClick={() => setEraser(v => !v)}
+                title="eraser — paint sections away"
+                className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-widest transition ${
+                  eraser
+                    ? 'bg-stone-900 text-stone-50'
+                    : 'text-stone-400 hover:text-stone-700'
+                }`}
+              >
+                Erase
+              </button>
               <span className="mx-1 h-5 w-px bg-stone-200" />
               <button
                 onClick={() => setThreeD(v => !v)}
@@ -354,7 +467,9 @@ export default function Game({ params }: Route.ComponentProps) {
             </div>
           ) : (
             playing && (
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-stone-200 bg-white/90 px-4 py-2 text-xs uppercase tracking-widest text-stone-400 shadow-sm">
+              // on phones the input sits right below the canvas — the hint
+              // pill would just cover the drawing
+              <div className="absolute bottom-3 left-1/2 hidden -translate-x-1/2 rounded-full border border-stone-200 bg-white/90 px-4 py-2 text-xs uppercase tracking-widest text-stone-400 shadow-sm lg:block">
                 {artistName} is drawing — type your guess →
               </div>
             )
@@ -362,11 +477,13 @@ export default function Game({ params }: Route.ComponentProps) {
         </section>
 
         {/* guess feed — live mirror of the guess table */}
-        <aside className="flex flex-col rounded-xl border border-stone-200 bg-white/70 lg:w-72">
-          <h2 className="border-b border-stone-100 p-4 text-xs font-medium uppercase tracking-widest text-stone-400">
+        {/* phones: a compact strip — recent chat capped at ~22dvh with the
+            input always pinned under it; desktop: full-height side panel */}
+        <aside className="flex min-h-0 shrink-0 flex-col rounded-xl border border-stone-200 bg-white/70 lg:w-72">
+          <h2 className="hidden border-b border-stone-100 p-4 text-xs font-medium uppercase tracking-widest text-stone-400 lg:block">
             Guesses
           </h2>
-          <div ref={feedRef} className="max-h-[40svh] flex-1 space-y-2 overflow-y-auto p-4 text-sm lg:max-h-none">
+          <div ref={feedRef} className="max-h-[22dvh] min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-sm lg:max-h-none lg:p-4">
             {guesses.map(g => (
               <p key={g.id} className={g.correct ? 'font-medium text-green-700' : ''}>
                 <span className="font-medium">{g.username}</span>{' '}
@@ -377,7 +494,7 @@ export default function Game({ params }: Route.ComponentProps) {
               <p className="italic text-stone-400">guesses will stream here in real time…</p>
             )}
           </div>
-          <div className="border-t border-stone-100 p-3">
+          <div className="border-t border-stone-100 p-2 lg:p-3">
             {guessError && (
               <p className="mb-2 text-xs text-red-600">{guessError}</p>
             )}
@@ -393,9 +510,11 @@ export default function Game({ params }: Route.ComponentProps) {
               placeholder={
                 isArtist
                   ? 'you’re drawing!'
-                  : guessedThisTurn
-                    ? 'you got it — waiting for the rest'
-                    : 'type your guess…'
+                  : choosing
+                    ? `${artistName} is picking a word…`
+                    : guessedThisTurn
+                      ? 'you got it — waiting for the rest'
+                      : 'type your guess…'
               }
               className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-stone-300 focus:border-stone-400 disabled:bg-stone-50"
             />
@@ -471,7 +590,7 @@ function GameOver({ code }: { code: string }) {
 
   return (
     <main className="flex min-h-svh flex-col bg-[#f7f5f1] text-stone-900">
-      <header className="flex items-center justify-between border-b border-stone-200 bg-white/70 px-5 py-3">
+      <header className="flex items-center justify-between border-b border-stone-200 bg-white/70 px-3 py-2 lg:px-5 lg:py-3">
         <Link to="/" className="font-serif text-2xl tracking-tight">
           Scri<span className="italic text-stone-500">battle</span>
         </Link>

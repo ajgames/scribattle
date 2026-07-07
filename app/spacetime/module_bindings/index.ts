@@ -35,7 +35,9 @@ import {
 
 // Import all reducer arg schemas
 import AddStrokeReducer from "./add_stroke_reducer";
+import AutoPickWordReducer from "./auto_pick_word_reducer";
 import CastVoteReducer from "./cast_vote_reducer";
+import ChooseWordReducer from "./choose_word_reducer";
 import ClearCanvasReducer from "./clear_canvas_reducer";
 import CreateGameReducer from "./create_game_reducer";
 import EndTurnReducer from "./end_turn_reducer";
@@ -56,6 +58,7 @@ import LiveStrokeRow from "./live_stroke_table";
 import PlayerRow from "./player_table";
 import StrokeRow from "./stroke_table";
 import VoteRow from "./vote_table";
+import WordChoiceRow from "./word_choice_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -153,12 +156,25 @@ const tablesSchema = __schema({
       { name: 'vote_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, VoteRow),
+  wordChoice: __table({
+    name: 'word_choice',
+    indexes: [
+      { accessor: 'gameCode', name: 'word_choice_game_code_idx_btree', algorithm: 'btree', columns: [
+        'gameCode',
+      ] },
+    ],
+    constraints: [
+      { name: 'word_choice_game_code_key', constraint: 'unique', columns: ['gameCode'] },
+    ],
+  }, WordChoiceRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("add_stroke", AddStrokeReducer),
+  __reducerSchema("auto_pick_word", AutoPickWordReducer),
   __reducerSchema("cast_vote", CastVoteReducer),
+  __reducerSchema("choose_word", ChooseWordReducer),
   __reducerSchema("clear_canvas", ClearCanvasReducer),
   __reducerSchema("create_game", CreateGameReducer),
   __reducerSchema("end_turn", EndTurnReducer),

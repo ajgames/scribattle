@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { loadStoredUsername } from '../game/names';
 import { useGameStore } from '../game/store';
+import { useGameSounds } from '../game/useGameSounds';
 import { REFERRAL_REWARD } from '../lib/catalog';
 import { useProfileStore } from '../lib/profile';
 import { captureRefParam } from '../lib/referral';
@@ -35,6 +36,8 @@ export default function Lobby({ params }: Route.ComponentProps) {
   const roomCode = useGameStore(s => s.roomCode);
   const players = useGameStore(s => s.players);
   const room = useGameStore(s => s.room);
+
+  useGameSounds();
 
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);

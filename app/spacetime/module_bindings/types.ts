@@ -89,3 +89,9 @@ export const Vote = __t.object("Vote", {
 });
 export type Vote = __Infer<typeof Vote>;
 
+export const WordChoice = __t.object("WordChoice", {
+  gameCode: __t.string(),
+  choices: __t.array(__t.string()),
+});
+export type WordChoice = __Infer<typeof WordChoice>;
+
