@@ -1,19 +1,17 @@
 import { Link } from 'react-router';
 import { ContentPage } from '../components/ContentPage';
+import { pageMeta } from '../lib/seo';
 import type { Route } from './+types/about';
 
 const CONTACT_EMAIL = 'jake@dubsado.com';
 
 export function meta({}: Route.MetaArgs) {
-  const title = 'About — Scribattle';
-  const description =
-    'Scribattle is a free, browser-based multiplayer drawing and guessing game. Learn what it is, who makes it, and how to get in touch.';
-  return [
-    { title },
-    { name: 'description', content: description },
-    { property: 'og:title', content: title },
-    { property: 'og:description', content: description },
-  ];
+  return pageMeta({
+    title: 'About Scribattle — Free Online Drawing & Guessing Game',
+    description:
+      'Scribattle is a free, browser-based multiplayer drawing and guessing game. Learn what it is, who makes it, and how to get in touch.',
+    path: '/about',
+  });
 }
 
 export default function About() {

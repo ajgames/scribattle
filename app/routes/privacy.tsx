@@ -1,20 +1,18 @@
 import { Link } from 'react-router';
 import { ContentPage } from '../components/ContentPage';
+import { pageMeta } from '../lib/seo';
 import type { Route } from './+types/privacy';
 
 const CONTACT_EMAIL = 'jake@dubsado.com';
 const LAST_UPDATED = 'July 6, 2026';
 
 export function meta({}: Route.MetaArgs) {
-  const title = 'Privacy Policy — Scribattle';
-  const description =
-    'How Scribattle collects, uses, and protects your information, including our use of cookies and third-party advertising such as Google AdSense.';
-  return [
-    { title },
-    { name: 'description', content: description },
-    { property: 'og:title', content: title },
-    { property: 'og:description', content: description },
-  ];
+  return pageMeta({
+    title: 'Privacy Policy — Scribattle',
+    description:
+      'How Scribattle collects, uses, and protects your information, including our use of cookies and third-party advertising such as Google AdSense.',
+    path: '/privacy',
+  });
 }
 
 export default function Privacy() {

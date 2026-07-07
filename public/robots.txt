@@ -1,0 +1,6 @@
+# game/lobby rooms are intentionally crawlable so their noindex meta is seen
+User-agent: *
+Disallow: /api/
+Disallow: /admin
+
+Sitemap: https://scribattle.io/sitemap.xml

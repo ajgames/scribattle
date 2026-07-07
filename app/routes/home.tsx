@@ -6,24 +6,36 @@ import { generateUsername, loadStoredUsername, storeUsername } from '../game/nam
 import { SiteFooter } from '../components/SiteFooter';
 import { useGameStore } from '../game/store';
 import { useProfileStore } from '../lib/profile';
+import { OG_IMAGE, pageMeta, SITE_URL } from '../lib/seo';
 import { captureRefParam } from '../lib/referral';
 import { connect, createGame, joinGame } from '../spacetime/connection';
 import type { Route } from './+types/home';
 
 export function meta({}: Route.MetaArgs) {
-  const title = 'Scribattle — Free Multiplayer Drawing & Guessing Game';
-  const description =
-    'Draw. Guess. Battle. Scribattle is a free multiplayer drawing game: one player sketches a secret word while everyone else races to guess it in real time — right in your browser.';
   return [
-    { title },
-    { name: 'description', content: description },
-    { property: 'og:title', content: title },
-    { property: 'og:description', content: description },
-    { property: 'og:type', content: 'website' },
-    { property: 'og:site_name', content: 'Scribattle' },
-    { name: 'twitter:card', content: 'summary' },
-    { name: 'twitter:title', content: title },
-    { name: 'twitter:description', content: description },
+    ...pageMeta({
+      title: 'Scribattle — Free Multiplayer Drawing & Guessing Game',
+      description:
+        'Draw. Guess. Battle. Scribattle is a free multiplayer drawing game: one player sketches a secret word while everyone else races to guess it in real time — right in your browser.',
+      path: '/',
+      image: true,
+    }),
+    {
+      'script:ld+json': {
+        '@context': 'https://schema.org',
+        '@type': 'VideoGame',
+        name: 'Scribattle',
+        url: `${SITE_URL}/`,
+        description:
+          'Free multiplayer drawing and guessing game. One player sketches a secret word while everyone else races to guess it in real time, right in the browser.',
+        image: OG_IMAGE,
+        genre: ['Party game', 'Word game', 'Drawing game'],
+        playMode: 'MultiPlayer',
+        gamePlatform: 'Web browser',
+        applicationCategory: 'Game',
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+      },
+    },
   ];
 }
 

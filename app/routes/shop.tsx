@@ -4,10 +4,16 @@ import { Link } from 'react-router';
 import { REFERRAL_REWARD, SHOP_ITEMS, WELCOME_BONUS, type ShopItem } from '../lib/catalog';
 import { buyItem, refreshProfile, useProfileStore } from '../lib/profile';
 import { referralLink } from '../lib/referral';
+import { pageMeta } from '../lib/seo';
 import type { Route } from './+types/shop';
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: 'Shop — Scribattle' }];
+  return pageMeta({
+    title: 'Shop — Ink Skins, Brushes & Ad-Free — Scribattle',
+    description:
+      'Spend Scribattle credits on ink skin packs, the fat-cap brush, and an ad-free experience. Earn free credits by inviting friends with your referral link.',
+    path: '/shop',
+  });
 }
 
 const KIND_LABEL: Record<ShopItem['kind'], string> = {

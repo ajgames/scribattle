@@ -22,10 +22,12 @@ import {
   sendStroke,
   submitGuess,
 } from '../spacetime/connection';
+import { pageMeta } from '../lib/seo';
 import type { Route } from './+types/game';
 
 export function meta({ params }: Route.MetaArgs) {
-  return [{ title: `Game ${params.code} — Scribattle` }];
+  // rooms are ephemeral — keep them out of search indexes
+  return pageMeta({ title: `Game ${params.code} — Scribattle`, noindex: true });
 }
 
 const PALETTE = ['#1c1917', '#dc2626', '#2563eb', '#16a34a', '#d97706'];

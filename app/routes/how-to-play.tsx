@@ -1,17 +1,15 @@
 import { Link } from 'react-router';
 import { ContentPage } from '../components/ContentPage';
+import { pageMeta } from '../lib/seo';
 import type { Route } from './+types/how-to-play';
 
 export function meta({}: Route.MetaArgs) {
-  const title = 'How to Play — Scribattle';
-  const description =
-    'Learn how to play Scribattle: create or join a room, take turns drawing a secret word, and race everyone else to guess the fastest for the biggest score.';
-  return [
-    { title },
-    { name: 'description', content: description },
-    { property: 'og:title', content: title },
-    { property: 'og:description', content: description },
-  ];
+  return pageMeta({
+    title: 'How to Play Scribattle — Rules, Scoring & Tips',
+    description:
+      'Learn how to play Scribattle: create or join a room, take turns drawing a secret word, and race everyone else to guess the fastest for the biggest score.',
+    path: '/how-to-play',
+  });
 }
 
 export default function HowToPlay() {

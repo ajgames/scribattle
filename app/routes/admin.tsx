@@ -3,10 +3,11 @@ import { Form, Link, useNavigation } from 'react-router';
 import { gameSnapshots, ipBans, reports, warnings } from '../../database/schema';
 import { requireAdmin } from '../lib/admin.server';
 import { db } from '../lib/db.server';
+import { pageMeta } from '../lib/seo';
 import type { Route } from './+types/admin';
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: 'Moderation — Scribattle' }];
+  return pageMeta({ title: 'Moderation — Scribattle', noindex: true });
 }
 
 const WARNING_PAGE = 50;
