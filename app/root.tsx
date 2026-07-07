@@ -50,6 +50,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#1c1917" />
+        <meta
+          name="google-adsense-account"
+          content="ca-pub-3025736277635211"
+        />
         <Meta />
         <Links />
       </head>
