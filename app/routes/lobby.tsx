@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { loadStoredUsername } from '../game/names';
 import { useGameStore } from '../game/store';
+import { REFERRAL_REWARD } from '../lib/catalog';
+import { useProfileStore } from '../lib/profile';
+import { captureRefParam } from '../lib/referral';
 import { ensureInGame, leaveGame, startGame } from '../spacetime/connection';
 import type { Route } from './+types/lobby';
 
@@ -28,10 +31,14 @@ export default function Lobby({ params }: Route.ComponentProps) {
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
   const [copied, setCopied] = useState<'code' | 'link' | null>(null);
+  const referralCode = useProfileStore(s => s.referralCode);
 
   function copy(what: 'code' | 'link') {
+    // signed-in hosts share referral-tagged links: friends who sign up from
+    // one earn the sharer credits (see app/lib/referral.ts)
+    const refTag = referralCode ? `?ref=${encodeURIComponent(referralCode)}` : '';
     const text =
-      what === 'code' ? code : `${window.location.origin}/lobby/${code}`;
+      what === 'code' ? code : `${window.location.origin}/lobby/${code}${refTag}`;
     navigator.clipboard
       .writeText(text)
       .then(() => {
@@ -52,6 +59,8 @@ export default function Lobby({ params }: Route.ComponentProps) {
 
   useEffect(() => {
     let cancelled = false;
+    // arrived via a friend's referral-tagged invite? remember it for signup
+    captureRefParam();
     // refresh wipes the store but not localStorage — recover the name; with
     // no name at all (shared link, fresh browser) go pick one, code prefilled
     const name = useGameStore.getState().username || loadStoredUsername();
@@ -155,6 +164,15 @@ export default function Lobby({ params }: Route.ComponentProps) {
             >
               copy invite link
             </button>
+            {referralCode && (
+              <p className="mt-1 text-center text-[11px] text-stone-400">
+                your link is referral-tagged — friends who sign up earn you{' '}
+                {REFERRAL_REWARD} credits for the{' '}
+                <Link to="/shop" className="underline">
+                  shop
+                </Link>
+              </p>
+            )}
           </div>
 
           {error ? (

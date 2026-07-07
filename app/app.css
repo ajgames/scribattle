@@ -13,6 +13,32 @@ body {
   color-scheme: light;
 }
 
+/* readable prose column for the static content pages */
+.content-prose {
+  @apply text-stone-700 leading-relaxed;
+}
+.content-prose h2 {
+  @apply mt-0 mb-6;
+}
+.content-prose h3 {
+  @apply font-serif text-2xl text-stone-900 mt-10 mb-3;
+}
+.content-prose p {
+  @apply my-4;
+}
+.content-prose ul {
+  @apply my-4 list-disc space-y-2 pl-6;
+}
+.content-prose ol {
+  @apply my-4 list-decimal space-y-2 pl-6;
+}
+.content-prose a {
+  @apply text-stone-900 underline underline-offset-2 transition hover:text-stone-500;
+}
+.content-prose strong {
+  @apply font-semibold text-stone-900;
+}
+
 /* soft tinted wash behind menu screens */
 .menu-backdrop {
   position: absolute;

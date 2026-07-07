@@ -1,5 +1,6 @@
-import { ClerkProvider } from "@clerk/react-router";
+import { ClerkProvider, useUser } from "@clerk/react-router";
 import { clerkMiddleware, rootAuthLoader } from "@clerk/react-router/server";
+import { useEffect } from "react";
 import {
   isRouteErrorResponse,
   Links,
@@ -11,6 +12,8 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import { claimReferral, refreshProfile } from "./lib/profile";
+import { clearPendingRef, loadPendingRef } from "./lib/referral";
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
@@ -66,10 +69,37 @@ export function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Boots the economy on the client: loads /api/profile into the store, and —
+ * right after a fresh signup that arrived via a ?ref= link — attributes the
+ * referral so the referrer earns credits. Renders nothing.
+ */
+function EconomyBoot() {
+  const { user, isLoaded } = useUser();
+
+  useEffect(() => {
+    if (isLoaded) refreshProfile();
+  }, [isLoaded, user?.id]);
+
+  useEffect(() => {
+    if (!user) return;
+    const ref = loadPendingRef();
+    if (!ref) return;
+    clearPendingRef(); // one attempt per stored code, success or not
+    // only fresh accounts count — signing in to a years-old account with a
+    // stale ?ref in storage shouldn't pay anyone
+    const ageMs = user.createdAt ? Date.now() - user.createdAt.getTime() : Infinity;
+    if (ageMs < 24 * 60 * 60 * 1000) claimReferral(ref);
+  }, [user?.id]);
+
+  return null;
+}
+
 export default function App({ loaderData }: Route.ComponentProps) {
   if (!loaderData) return <Outlet />;
   return (
     <ClerkProvider loaderData={loaderData}>
+      <EconomyBoot />
       <Outlet />
     </ClerkProvider>
   );

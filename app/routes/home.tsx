@@ -3,7 +3,10 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ROOM_CODE_LENGTH } from '../game/constants';
 import { generateUsername, loadStoredUsername, storeUsername } from '../game/names';
+import { SiteFooter } from '../components/SiteFooter';
 import { useGameStore } from '../game/store';
+import { useProfileStore } from '../lib/profile';
+import { captureRefParam } from '../lib/referral';
 import { connect, createGame, joinGame } from '../spacetime/connection';
 import type { Route } from './+types/home';
 
@@ -42,13 +45,17 @@ export default function Home() {
   const joinOnly = inviteCode.length === ROOM_CODE_LENGTH;
 
   const [joinCode, setJoinCode] = useState(inviteCode);
-  const [listPublicly, setListPublicly] = useState(true);
+  const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'create' | 'join' | null>(null);
+  const credits = useProfileStore(s => s.credits);
+  const signedIn = useProfileStore(s => s.signedIn);
 
   // prefill: saved name from a previous game, otherwise a fresh random one.
-  // Also warm up the SpacetimeDB connection so create/join feel instant.
+  // Also warm up the SpacetimeDB connection so create/join feel instant, and
+  // remember any ?ref= referral tag for post-signup attribution.
   useEffect(() => {
+    captureRefParam();
     if (!useGameStore.getState().username) {
       setUsername(loadStoredUsername() ?? generateUsername());
     }
@@ -73,7 +80,9 @@ export default function Home() {
     try {
       // server-authoritative: create_game generates the room code, join_game
       // validates it — both reject with a human-readable message
-      const roomCode = code ? await joinGame(name, code) : await createGame(name, listPublicly);
+      const roomCode = code
+        ? await joinGame(name, code)
+        : await createGame(name, visibility === 'public');
       // joining a game that's already underway drops you straight onto the easel
       const status = useGameStore.getState().room?.status;
       navigate(status === 'playing' ? `/game/${roomCode}` : `/lobby/${roomCode}`);
@@ -89,6 +98,16 @@ export default function Home() {
       <div className="menu-backdrop" aria-hidden />
 
       <nav className="absolute right-4 top-4 z-20 flex items-center gap-2">
+        <Link
+          to="/shop"
+          className="rounded-lg px-3 py-2 text-sm font-medium text-stone-600 transition hover:text-stone-900"
+        >
+          {signedIn ? (
+            <span className="font-mono tabular-nums">✨ {credits}</span>
+          ) : (
+            'Shop'
+          )}
+        </Link>
         <Show when="signed-out">
           <SignInButton mode="modal">
             <button className="rounded-lg px-4 py-2 text-sm font-medium text-stone-600 transition hover:text-stone-900">
@@ -167,17 +186,34 @@ export default function Home() {
                 disabled={busy !== null}
                 className="mt-1 w-full rounded-lg bg-stone-900 py-3 text-lg font-medium text-stone-50 transition enabled:hover:bg-stone-700 enabled:active:scale-[0.99] disabled:opacity-60"
               >
-                {busy === 'create' ? 'Creating…' : 'Create Game'}
+                {busy === 'create'
+                  ? 'Creating…'
+                  : visibility === 'private'
+                    ? 'Create Private Game'
+                    : 'Create Game'}
               </button>
-              <label className="flex items-center justify-center gap-2 text-xs text-stone-500">
-                <input
-                  type="checkbox"
-                  checked={listPublicly}
-                  onChange={e => setListPublicly(e.target.checked)}
-                  className="size-3.5 accent-stone-900"
-                />
-                list my game publicly so anyone can join
-              </label>
+              {/* private rooms never appear in "games happening now" — the
+                  server stores the flag and every client filters on it */}
+              <div className="flex w-full rounded-lg border border-stone-200 bg-white p-0.5 text-xs font-medium">
+                {(['public', 'private'] as const).map(v => (
+                  <button
+                    key={v}
+                    onClick={() => setVisibility(v)}
+                    className={`flex-1 rounded-md py-1.5 uppercase tracking-widest transition ${
+                      visibility === v
+                        ? 'bg-stone-900 text-stone-50'
+                        : 'text-stone-400 hover:text-stone-700'
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+              <p className="text-center text-xs text-stone-400">
+                {visibility === 'private'
+                  ? 'invite-only — never listed, join by code or link'
+                  : 'listed under “games happening now” for anyone to join'}
+              </p>
 
               <div className="my-2 flex items-center gap-3 text-xs text-stone-400">
                 <div className="h-px flex-1 bg-stone-200" />
@@ -264,9 +300,11 @@ export default function Home() {
           </section>
         )}
 
-        <footer className="text-center text-xs text-stone-400">
+        <p className="text-center text-xs text-stone-400">
           one player draws · everyone guesses · fastest correct guess scores big
-        </footer>
+        </p>
+
+        <SiteFooter />
       </div>
     </main>
   );

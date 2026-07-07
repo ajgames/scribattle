@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
+import { AdBreak } from '../components/AdBreak';
 import { ClientOnly } from '../components/ClientOnly';
 import { DrawCanvas } from '../game/three/DrawCanvas';
 import { hintedWordDisplay } from '../game/hints';
 import { loadStoredUsername } from '../game/names';
 import { useGameStore, type VoteCategory } from '../game/store';
+import { AD_FREE_ITEM_ID, REFERRAL_REWARD, SHOP_ITEMS } from '../lib/catalog';
+import { useProfileStore } from '../lib/profile';
+import { referralLink } from '../lib/referral';
 import {
   castVote,
   clearCanvas,
@@ -24,6 +28,7 @@ export function meta({ params }: Route.MetaArgs) {
 
 const PALETTE = ['#1c1917', '#dc2626', '#2563eb', '#16a34a', '#d97706'];
 const BRUSH_WIDTH = 0.007; // normalized to paper width, matches server clamps
+const FAT_BRUSH_WIDTH = 0.016; // 'fat-cap' shop unlock — still inside server clamps
 
 const VOTE_BUTTONS: { category: VoteCategory; emoji: string; label: string }[] = [
   { category: 'funny', emoji: '😂', label: 'funny' },
@@ -65,8 +70,30 @@ export default function Game({ params }: Route.ComponentProps) {
 
   const [color, setColor] = useState(PALETTE[0]);
   const [threeD, setThreeD] = useState(false);
+  const [fatBrush, setFatBrush] = useState(false);
   const [guessDraft, setGuessDraft] = useState('');
+  const [guessError, setGuessError] = useState('');
   const feedRef = useRef<HTMLDivElement>(null);
+
+  // shop unlocks shape the easel: skin packs add inks, 'fat-cap' adds a
+  // brush size, 'ad-free' skips the post-match ad break entirely
+  const unlockIds = useProfileStore(s => s.unlocks);
+  const palette = useMemo(
+    () => [
+      ...PALETTE,
+      ...SHOP_ITEMS.filter(i => i.colors && unlockIds.includes(i.id)).flatMap(
+        i => i.colors!
+      ),
+    ],
+    [unlockIds]
+  );
+  const hasFatCap = unlockIds.includes('fat-cap');
+  const adFree = unlockIds.includes(AD_FREE_ITEM_ID);
+  const brushWidth = hasFatCap && fatBrush ? FAT_BRUSH_WIDTH : BRUSH_WIDTH;
+
+  // one ad break per match end — reset when the room leaves 'finished'
+  // (rematch) so the next match gets its own break
+  const [adWatched, setAdWatched] = useState(false);
 
   // same refresh recovery as the lobby: persisted identity re-attaches to its
   // player row; a nameless direct visit goes to the menu with the code prefilled
@@ -95,6 +122,10 @@ export default function Game({ params }: Route.ComponentProps) {
   const inRoom = roomCode === code;
   const playing = inRoom && room?.status === 'playing';
   const finished = inRoom && room?.status === 'finished';
+
+  useEffect(() => {
+    if (!finished) setAdWatched(false);
+  }, [finished]);
   const isArtist = !!playing && room.artist === identity;
   const artistName = players.find(p => p.isArtist)?.username ?? '…';
   const guessedThisTurn =
@@ -139,13 +170,20 @@ export default function Game({ params }: Route.ComponentProps) {
     const text = guessDraft.trim();
     if (!text || !canGuess) return;
     setGuessDraft('');
-    submitGuess(text).catch(() => {
-      // reducer rejections (game ended between keystrokes) — drop silently,
-      // the feed reflects whatever the server accepted
+    setGuessError('');
+    submitGuess(text).catch(err => {
+      // surface real rejections (e.g. the profanity filter); a game that
+      // ended between keystrokes just reads as a generic miss
+      setGuessError(err instanceof Error ? err.message : 'Guess not sent');
     });
   }
 
   if (finished) {
+    // the ad break runs between the buzzer and the results; the 'ad-free'
+    // shop perk (and a rematch reset) skip straight through
+    if (!adFree && !adWatched) {
+      return <AdBreak onDone={() => setAdWatched(true)} />;
+    }
     return <GameOver code={code} />;
   }
 
@@ -218,13 +256,13 @@ export default function Game({ params }: Route.ComponentProps) {
               liveStroke={liveStroke}
               canDraw={isArtist}
               color={color}
-              width={BRUSH_WIDTH}
+              width={brushWidth}
               threeD={threeD}
               onStrokeProgress={points => {
-                sendLiveStroke(points, color, BRUSH_WIDTH, threeD);
+                sendLiveStroke(points, color, brushWidth, threeD);
               }}
               onStrokeEnd={points => {
-                sendStroke(points, color, BRUSH_WIDTH, threeD).catch(() => {
+                sendStroke(points, color, brushWidth, threeD).catch(() => {
                   // rejected stroke (turn rotated mid-draw) just never appears
                 });
               }}
@@ -233,7 +271,7 @@ export default function Game({ params }: Route.ComponentProps) {
 
           {isArtist ? (
             <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-stone-200 bg-white/90 px-4 py-2 shadow-sm">
-              {PALETTE.map(c => (
+              {palette.map(c => (
                 <button
                   key={c}
                   onClick={() => setColor(c)}
@@ -258,6 +296,19 @@ export default function Game({ params }: Route.ComponentProps) {
               >
                 3D
               </button>
+              {hasFatCap && (
+                <button
+                  onClick={() => setFatBrush(v => !v)}
+                  title="fat cap brush (shop unlock)"
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-widest transition ${
+                    fatBrush
+                      ? 'bg-stone-900 text-stone-50'
+                      : 'text-stone-400 hover:text-stone-700'
+                  }`}
+                >
+                  Fat
+                </button>
+              )}
               <span className="mx-1 h-5 w-px bg-stone-200" />
               <button
                 onClick={() => clearCanvas().catch(() => {})}
@@ -292,9 +343,15 @@ export default function Game({ params }: Route.ComponentProps) {
             )}
           </div>
           <div className="border-t border-stone-100 p-3">
+            {guessError && (
+              <p className="mb-2 text-xs text-red-600">{guessError}</p>
+            )}
             <input
               value={guessDraft}
-              onChange={e => setGuessDraft(e.target.value)}
+              onChange={e => {
+                setGuessDraft(e.target.value);
+                setGuessError('');
+              }}
               onKeyDown={e => e.key === 'Enter' && handleGuess()}
               disabled={!canGuess}
               maxLength={64}
@@ -328,11 +385,29 @@ function GameOver({ code }: { code: string }) {
   const votes = useGameStore(s => s.votes);
 
   const [slide, setSlide] = useState(0);
+  const [shareCopied, setShareCopied] = useState(false);
+  const signedIn = useProfileStore(s => s.signedIn);
+  const referralCode = useProfileStore(s => s.referralCode);
 
   const standings = useMemo(
     () => [...players].sort((a, b) => b.score - a.score),
     [players]
   );
+
+  // signed-in players share referral-tagged links — each signup pays credits
+  function copyShareLink() {
+    const url =
+      signedIn && referralCode
+        ? referralLink(referralCode, window.location.origin)
+        : window.location.origin;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 1500);
+      })
+      .catch(() => {});
+  }
   const isHost = players.find(p => p.id === identity)?.isHost ?? false;
 
   const current = drawings[Math.min(slide, Math.max(0, drawings.length - 1))];
@@ -408,6 +483,20 @@ function GameOver({ code }: { code: string }) {
               className="w-full rounded-lg border border-stone-200 bg-white py-2.5 text-sm text-stone-500 transition hover:text-stone-800"
             >
               Leave game
+            </button>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-stone-200 bg-white/70 p-4 text-center">
+            <p className="text-xs text-stone-500">
+              {signedIn
+                ? `Share Scribattle — every friend who signs up from your link earns you ${REFERRAL_REWARD} credits for skins, tools, and ad-free play.`
+                : 'Loved the match? Share Scribattle with a friend.'}
+            </p>
+            <button
+              onClick={copyShareLink}
+              className="mt-2 rounded-full border border-stone-200 bg-white px-4 py-1.5 text-xs font-medium uppercase tracking-widest text-stone-500 transition hover:border-stone-400 hover:text-stone-800"
+            >
+              {shareCopied ? 'link copied!' : 'copy share link'}
             </button>
           </div>
         </aside>

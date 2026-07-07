@@ -15,6 +15,7 @@
  * Generate client bindings with:   npm run stdb:generate
  */
 import { SenderError, schema, table, t, type ReducerCtx } from 'spacetimedb/server';
+import { containsProfanity } from './profanity';
 
 // keep in sync with app/game/constants.ts
 const ROOM_CODE_LENGTH = 4;
@@ -191,6 +192,7 @@ function randomWord(ctx: { random(): number }): string {
 function cleanUsername(raw: string): string {
   const name = raw.trim().slice(0, MAX_USERNAME_LENGTH);
   if (name.length < 2) throw new SenderError('Username must be at least 2 characters');
+  if (containsProfanity(name)) throw new SenderError('Pick a cleaner username');
   return name;
 }
 
@@ -501,6 +503,10 @@ export const submitGuess = spacetimedb.reducer({ text: t.string() }, (ctx, { tex
 
   const cleaned = text.trim().slice(0, MAX_GUESS_LENGTH);
   if (!cleaned) return;
+  // wrong guesses are broadcast to the whole room — keep the feed family-friendly
+  if (containsProfanity(cleaned)) {
+    throw new SenderError('Let’s keep it friendly — that guess was blocked');
+  }
 
   const turnGuesses = [...ctx.db.guess.gameCode.filter(room.code)].filter(
     g => g.turn === room.turn
