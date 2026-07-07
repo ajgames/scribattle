@@ -46,6 +46,10 @@ const END_TURN_GRACE_MICROS = 500_000n;
 const WORD_CHOICE_COUNT = 3;
 const WORD_CHOICE_SECONDS = 10;
 
+// a room where every player has been offline this long is dead — reaped by
+// the sweep in connect/create/join (there's no scheduled reaper yet)
+const STALE_GAME_MICROS = 5n * 60n * 1_000_000n;
+
 const VOTE_CATEGORIES = ['funny', 'artistic', 'horrible'] as const;
 
 // curated drawable-noun pack — flat difficulty for now (tiers later)
@@ -252,6 +256,22 @@ const wordChoice = table(
   }
 );
 
+/**
+ * Server-internal heartbeat, one row per room: bumped by every meaningful
+ * reducer (join, turn events, guesses, votes, presence flips). The stale-game
+ * sweep compares against it, so rooms whose players all vanished get reaped
+ * instead of haunting the public list forever. Public only because the client
+ * SDK crashes on codegen'd types for private tables (dangling type ref in
+ * schema()); no client subscribes to it, and it's just a code + timestamp.
+ */
+const activity = table(
+  { name: 'activity', public: true },
+  {
+    gameCode: t.string().primaryKey(),
+    lastActiveAt: t.timestamp(),
+  }
+);
+
 const spacetimedb = schema({
   game,
   player,
@@ -261,6 +281,7 @@ const spacetimedb = schema({
   vote,
   guess,
   wordChoice,
+  activity,
 });
 
 function randomCode(ctx: { random(): number }): string {
@@ -308,6 +329,39 @@ function deleteGameArtifacts(ctx: Ctx, code: string) {
   ctx.db.wordChoice.gameCode.delete(code);
 }
 
+/** Bump the room's heartbeat — see the `activity` table. */
+function touchActivity(ctx: Ctx, code: string) {
+  const row = { gameCode: code, lastActiveAt: ctx.timestamp };
+  if (ctx.db.activity.gameCode.find(code)) {
+    ctx.db.activity.gameCode.update(row);
+  } else {
+    ctx.db.activity.insert(row);
+  }
+}
+
+/**
+ * Reap rooms whose players are all offline and whose heartbeat went quiet.
+ * Runs opportunistically on connect/create/join — cheap at this scale, and it
+ * always fires right before someone looks at the public games list. Rooms
+ * with anyone online are never touched, no matter how idle (a host camping
+ * an open lobby is legitimate).
+ */
+function expireStaleGames(ctx: Ctx) {
+  for (const room of ctx.db.game.iter()) {
+    const players = playersIn(ctx, room.code);
+    if (players.some(p => p.online)) continue;
+    // pre-activity rooms fall back to createdAt (their heartbeat never wrote)
+    const lastActive =
+      ctx.db.activity.gameCode.find(room.code)?.lastActiveAt ?? room.createdAt;
+    if (ctx.timestamp.since(lastActive).micros < STALE_GAME_MICROS) continue;
+
+    for (const p of players) ctx.db.player.identity.delete(p.identity);
+    ctx.db.game.code.delete(room.code);
+    deleteGameArtifacts(ctx, room.code);
+    ctx.db.activity.gameCode.delete(room.code);
+  }
+}
+
 /**
  * Point the room at a new artist/turn and open the pick-a-word window: the
  * artist gets WORD_CHOICE_COUNT options, `currentWord` stays '' and
@@ -331,6 +385,7 @@ function beginTurn(ctx: Ctx, room: GameRow, artist: PlayerRow, turn: number, rou
     turnStartedAt: ctx.timestamp,
   };
   ctx.db.game.code.update(updated);
+  touchActivity(ctx, room.code);
   return updated;
 }
 
@@ -351,6 +406,7 @@ function lockWord(ctx: Ctx, room: GameRow, word: string): void {
     currentWord: word,
     turnStartedAt: ctx.timestamp,
   });
+  touchActivity(ctx, room.code);
 }
 
 /**
@@ -359,6 +415,7 @@ function lockWord(ctx: Ctx, room: GameRow, word: string): void {
  * strokes/drawings stick around for the slideshow until the room dies.
  */
 function advanceTurn(ctx: Ctx, room: GameRow): GameRow {
+  touchActivity(ctx, room.code);
   const roster = playersIn(ctx, room.code);
   if (roster.length === 0) return room;
   const idx = roster.findIndex(p => p.identity.isEqual(room.artist));
@@ -395,6 +452,7 @@ function detachFromGame(ctx: Ctx) {
   if (remaining.length === 0) {
     ctx.db.game.code.delete(room.code);
     deleteGameArtifacts(ctx, room.code);
+    ctx.db.activity.gameCode.delete(room.code);
     return;
   }
   let updated = { ...room, playerCount: remaining.length };
@@ -415,6 +473,8 @@ export const createGame = spacetimedb.reducer(
   { username: t.string(), isPublic: t.bool() },
   (ctx, { username, isPublic }) => {
     const name = cleanUsername(username);
+
+    expireStaleGames(ctx);
 
     let code = randomCode(ctx);
     while (ctx.db.game.code.find(code)) code = randomCode(ctx);
@@ -445,6 +505,7 @@ export const createGame = spacetimedb.reducer(
       online: true,
       joinedAt: ctx.timestamp,
     });
+    touchActivity(ctx, code);
   }
 );
 
@@ -452,6 +513,7 @@ export const joinGame = spacetimedb.reducer(
   { username: t.string(), code: t.string() },
   (ctx, { username, code }) => {
     const name = cleanUsername(username);
+    expireStaleGames(ctx);
 
     const room = ctx.db.game.code.find(code.toUpperCase());
     if (!room) throw new SenderError('Game not found — check the code');
@@ -460,6 +522,7 @@ export const joinGame = spacetimedb.reducer(
     const existing = ctx.db.player.identity.find(ctx.sender);
     if (existing && existing.gameCode === room.code) {
       ctx.db.player.identity.update({ ...existing, username: name, online: true });
+      touchActivity(ctx, room.code);
       return;
     }
 
@@ -483,6 +546,7 @@ export const joinGame = spacetimedb.reducer(
     // detachFromGame only touches the sender's *previous* game (the same-game
     // case returned above), so `room` is still current
     ctx.db.game.code.update({ ...room, playerCount: room.playerCount + 1 });
+    touchActivity(ctx, room.code);
   }
 );
 
@@ -660,6 +724,7 @@ export const submitGuess = spacetimedb.reducer({ text: t.string() }, (ctx, { tex
     return; // already got it this turn — swallow chatter until turn ends
   }
 
+  touchActivity(ctx, room.code);
   const correct = normalizeGuess(cleaned) === normalizeGuess(room.currentWord);
   ctx.db.guess.insert({
     id: 0n,
@@ -721,6 +786,7 @@ export const castVote = spacetimedb.reducer(
     const prior = [...ctx.db.vote.gameCode.filter(room.code)].find(
       v => v.category === category && v.voter.isEqual(ctx.sender)
     );
+    touchActivity(ctx, room.code);
     if (prior) {
       ctx.db.vote.id.delete(prior.id);
       if (prior.turn === turn) return; // same pick again — retract
@@ -751,6 +817,7 @@ export const playAgain = spacetimedb.reducer(ctx => {
     round: 0,
     turnStartedAt: ctx.timestamp,
   });
+  touchActivity(ctx, room.code);
 });
 
 /**
@@ -761,13 +828,22 @@ export const playAgain = spacetimedb.reducer(ctx => {
  */
 export const onConnect = spacetimedb.clientConnected(ctx => {
   const me = ctx.db.player.identity.find(ctx.sender);
-  if (me && !me.online) ctx.db.player.identity.update({ ...me, online: true });
+  if (me) {
+    if (!me.online) ctx.db.player.identity.update({ ...me, online: true });
+    touchActivity(ctx, me.gameCode);
+  }
+  // every visitor sweeps — the public games list they're about to see never
+  // shows rooms that died with their tabs (my row is online now, so my own
+  // room is safe)
+  expireStaleGames(ctx);
 });
 
 export const onDisconnect = spacetimedb.clientDisconnected(ctx => {
   const me = ctx.db.player.identity.find(ctx.sender);
   if (!me || !me.online) return;
   ctx.db.player.identity.update({ ...me, online: false });
+  // stamp when the room went quiet — the stale sweep measures from here
+  touchActivity(ctx, me.gameCode);
 
   // if everyone still connected already solved the word, the leaver was the
   // only thing keeping the turn alive — rotate now instead of waiting out the

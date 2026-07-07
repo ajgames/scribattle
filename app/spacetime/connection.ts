@@ -207,9 +207,16 @@ function sync() {
   const allPlayers = [...conn.db.player.iter()];
   const allGames = [...conn.db.game.iter()];
 
-  // public rooms browsable from the main menu, newest first
+  // public rooms browsable from the main menu, newest first. Rooms where
+  // everyone is offline are hidden immediately — the server reaps them a few
+  // minutes later (see expireStaleGames in the module)
   const openGames: OpenGameInfo[] = allGames
-    .filter(g => g.isPublic && g.status !== 'finished')
+    .filter(
+      g =>
+        g.isPublic &&
+        g.status !== 'finished' &&
+        allPlayers.some(p => p.gameCode === g.code && p.online)
+    )
     .sort((a, b) => Number(b.createdAt.microsSinceUnixEpoch - a.createdAt.microsSinceUnixEpoch))
     .map(g => ({
       code: g.code,

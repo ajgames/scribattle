@@ -51,6 +51,7 @@ import UpdateLiveStrokeReducer from "./update_live_stroke_reducer";
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+import ActivityRow from "./activity_table";
 import DrawingRow from "./drawing_table";
 import GameRow from "./game_table";
 import GuessRow from "./guess_table";
@@ -64,6 +65,17 @@ import WordChoiceRow from "./word_choice_table";
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+  activity: __table({
+    name: 'activity',
+    indexes: [
+      { accessor: 'gameCode', name: 'activity_game_code_idx_btree', algorithm: 'btree', columns: [
+        'gameCode',
+      ] },
+    ],
+    constraints: [
+      { name: 'activity_game_code_key', constraint: 'unique', columns: ['gameCode'] },
+    ],
+  }, ActivityRow),
   drawing: __table({
     name: 'drawing',
     indexes: [
