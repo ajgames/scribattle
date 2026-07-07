@@ -5,7 +5,7 @@ import { useGameStore } from '../game/store';
 import { REFERRAL_REWARD } from '../lib/catalog';
 import { useProfileStore } from '../lib/profile';
 import { captureRefParam } from '../lib/referral';
-import { pageMeta } from '../lib/seo';
+import { JOIN_OG_IMAGE, pageMeta } from '../lib/seo';
 import { ensureInGame, leaveGame, startGame } from '../spacetime/connection';
 import type { Route } from './+types/lobby';
 
@@ -16,7 +16,7 @@ export function meta({ params }: Route.MetaArgs) {
     title: `Lobby ${params.code} — Scribattle`,
     description: `You're invited to room ${params.code} on Scribattle, the free multiplayer drawing and guessing game. Tap to join the battle!`,
     noindex: true,
-    image: true,
+    image: JOIN_OG_IMAGE,
   });
 }
 

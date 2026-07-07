@@ -7,7 +7,9 @@
 export const SITE_URL = 'https://scribattle.io';
 export const SITE_NAME = 'Scribattle';
 
+// both are 1536×1024 — keep the width/height tags below honest if that changes
 export const OG_IMAGE = `${SITE_URL}/home-og-image.jpg`;
+export const JOIN_OG_IMAGE = `${SITE_URL}/join-game-og-image.jpg`;
 const OG_IMAGE_WIDTH = '1536';
 const OG_IMAGE_HEIGHT = '1024';
 
@@ -20,8 +22,8 @@ interface PageMetaOptions {
   path?: string;
   /** Ephemeral or private pages (game rooms, admin, auth) that search engines should skip. */
   noindex?: boolean;
-  /** Attach the site og image — for pages people share links to (home, lobby invites). */
-  image?: boolean;
+  /** og image URL (OG_IMAGE / JOIN_OG_IMAGE) — for pages people share links to. */
+  image?: string;
 }
 
 export function pageMeta({ title, description, path, noindex, image }: PageMetaOptions): MetaDescriptor[] {
@@ -51,10 +53,10 @@ export function pageMeta({ title, description, path, noindex, image }: PageMetaO
 
   if (image) {
     tags.push(
-      { property: 'og:image', content: OG_IMAGE },
+      { property: 'og:image', content: image },
       { property: 'og:image:width', content: OG_IMAGE_WIDTH },
       { property: 'og:image:height', content: OG_IMAGE_HEIGHT },
-      { name: 'twitter:image', content: OG_IMAGE },
+      { name: 'twitter:image', content: image },
     );
   }
 

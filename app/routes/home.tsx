@@ -18,7 +18,7 @@ export function meta({}: Route.MetaArgs) {
       description:
         'Draw. Guess. Battle. Scribattle is a free multiplayer drawing game: one player sketches a secret word while everyone else races to guess it in real time — right in your browser.',
       path: '/',
-      image: true,
+      image: OG_IMAGE,
     }),
     {
       'script:ld+json': {
