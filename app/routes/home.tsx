@@ -11,6 +11,10 @@ import { captureRefParam } from '../lib/referral';
 import { connect, createGame, joinGame } from '../spacetime/connection';
 import type { Route } from './+types/home';
 
+// beta: the account/economy nav (shop, sign in/up) is hidden until the core
+// game is out of beta — flip this to bring it back
+const SHOW_ACCOUNT_NAV = false;
+
 export function meta({}: Route.MetaArgs) {
   return [
     ...pageMeta({
@@ -109,33 +113,35 @@ export default function Home() {
     <main className="relative flex min-h-svh items-center justify-center overflow-hidden bg-[#f7f5f1] text-stone-900">
       <div className="menu-backdrop" aria-hidden />
 
-      <nav className="absolute right-4 top-4 z-20 flex items-center gap-2">
-        <Link
-          to="/shop"
-          className="rounded-lg px-3 py-2 text-sm font-medium text-stone-600 transition hover:text-stone-900"
-        >
-          {signedIn ? (
-            <span className="font-mono tabular-nums">✨ {credits}</span>
-          ) : (
-            'Shop'
-          )}
-        </Link>
-        <Show when="signed-out">
-          <SignInButton mode="modal">
-            <button className="rounded-lg px-4 py-2 text-sm font-medium text-stone-600 transition hover:text-stone-900">
-              Sign in
-            </button>
-          </SignInButton>
-          <SignUpButton mode="modal">
-            <button className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-stone-50 transition hover:bg-stone-700">
-              Sign up
-            </button>
-          </SignUpButton>
-        </Show>
-        <Show when="signed-in">
-          <UserButton />
-        </Show>
-      </nav>
+      {SHOW_ACCOUNT_NAV && (
+        <nav className="absolute right-4 top-4 z-20 flex items-center gap-2">
+          <Link
+            to="/shop"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-stone-600 transition hover:text-stone-900"
+          >
+            {signedIn ? (
+              <span className="font-mono tabular-nums">✨ {credits}</span>
+            ) : (
+              'Shop'
+            )}
+          </Link>
+          <Show when="signed-out">
+            <SignInButton mode="modal">
+              <button className="rounded-lg px-4 py-2 text-sm font-medium text-stone-600 transition hover:text-stone-900">
+                Sign in
+              </button>
+            </SignInButton>
+            <SignUpButton mode="modal">
+              <button className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-stone-50 transition hover:bg-stone-700">
+                Sign up
+              </button>
+            </SignUpButton>
+          </Show>
+          <Show when="signed-in">
+            <UserButton />
+          </Show>
+        </nav>
+      )}
 
       <div className="relative z-10 flex w-full max-w-sm flex-col items-center gap-10 px-6 py-12">
         <header className="text-center">
@@ -143,6 +149,9 @@ export default function Home() {
             <Link to="/">
               Scri<span className="italic text-stone-500">battle</span>
             </Link>
+            <sup className="ml-1.5 font-sans text-xs font-medium uppercase tracking-widest text-stone-400">
+              beta
+            </sup>
           </h1>
           <p className="mt-3 text-sm text-stone-500">Draw. Guess. Battle. Repeat.</p>
         </header>
