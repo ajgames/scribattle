@@ -8,6 +8,7 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useLocation,
 } from "react-router";
 
 import type { Route } from "./+types/root";
@@ -103,6 +104,34 @@ gtag('config', 'AW-18304297991');`,
   );
 }
 
+declare global {
+  interface Window {
+    // Defined by the gtag.js inline snippet in <head>.
+    gtag?: (...args: unknown[]) => void;
+  }
+}
+
+/**
+ * Fires the Google Ads "page view" conversion on every route view — the
+ * initial load plus each client-side navigation. This is an SPA, so the
+ * inline event snippet Google provides would only fire on the first hard
+ * load; keying the effect on pathname re-fires it per in-app page view.
+ * Renders nothing.
+ */
+function PageViewConversion() {
+  const location = useLocation();
+
+  useEffect(() => {
+    window.gtag?.("event", "conversion", {
+      send_to: "AW-18304297991/96DFCMvNgswcEIfYlZhE",
+      value: 1.0,
+      currency: "USD",
+    });
+  }, [location.pathname]);
+
+  return null;
+}
+
 /**
  * Boots the economy on the client: loads /api/profile into the store, and —
  * right after a fresh signup that arrived via a ?ref= link — attributes the
@@ -150,9 +179,16 @@ export default function App({ loaderData }: Route.ComponentProps) {
   if (ban?.banned && ban.bannedUntil) {
     return <BannedScreen until={ban.bannedUntil} />;
   }
-  if (!loaderData) return <Outlet />;
+  if (!loaderData)
+    return (
+      <>
+        <PageViewConversion />
+        <Outlet />
+      </>
+    );
   return (
     <ClerkProvider loaderData={loaderData}>
+      <PageViewConversion />
       <EconomyBoot />
       <Outlet />
     </ClerkProvider>
