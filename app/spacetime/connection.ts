@@ -132,6 +132,7 @@ function doConnect(token: string | undefined): Promise<DbConnection> {
             'SELECT * FROM vote',
             'SELECT * FROM guess',
             'SELECT * FROM word_choice',
+            'SELECT * FROM spectator',
           ]);
       })
       .onConnectError((_ctx, err) => {
@@ -178,6 +179,7 @@ function registerRowCallbacks(connection: DbConnection) {
     connection.db.vote,
     connection.db.guess,
     connection.db.wordChoice,
+    connection.db.spectator,
   ] as const) {
     tbl.onInsert(scheduleSync);
     tbl.onDelete(scheduleSync);
@@ -206,6 +208,7 @@ function sync() {
 
   const allPlayers = [...conn.db.player.iter()];
   const allGames = [...conn.db.game.iter()];
+  const allSpectators = [...conn.db.spectator.iter()];
 
   // public rooms browsable from the main menu, newest first. Rooms where
   // everyone is offline are hidden immediately — the server reaps them a few
@@ -225,10 +228,16 @@ function sync() {
       maxPlayers: g.maxPlayers,
       hostName:
         allPlayers.find(p => p.gameCode === g.code && p.isHost)?.username ?? 'unknown',
+      spectatorCount: allSpectators.filter(s => s.gameCode === g.code).length,
     }));
 
+  // the focused room comes from my player row, or failing that my spectator
+  // row (watch mode) — both survive refreshes server-side
   const myRow = allPlayers.find(p => p.identity.toHexString() === myIdentityHex) ?? null;
-  if (!myRow) {
+  const mySpectatorRow = myRow
+    ? null
+    : (allSpectators.find(s => s.identity.toHexString() === myIdentityHex) ?? null);
+  if (!myRow && !mySpectatorRow) {
     store.serverSync({
       room: null,
       players: [],
@@ -238,11 +247,13 @@ function sync() {
       votes: [],
       guesses: [],
       openGames,
+      isWatching: false,
+      spectatorCount: 0,
     });
     return;
   }
 
-  const code = myRow.gameCode;
+  const code = myRow ? myRow.gameCode : mySpectatorRow!.gameCode;
   const gameRow = allGames.find(g => g.code === code);
   const room: RoomInfo | null = gameRow
     ? {
@@ -326,7 +337,18 @@ function sync() {
       turn: g.turn,
     }));
 
-  store.serverSync({ room, players, strokes, liveStroke, drawings, votes, guesses, openGames });
+  store.serverSync({
+    room,
+    players,
+    strokes,
+    liveStroke,
+    drawings,
+    votes,
+    guesses,
+    openGames,
+    isWatching: !myRow,
+    spectatorCount: allSpectators.filter(s => s.gameCode === code).length,
+  });
 }
 
 /** Resolve when the mirrored store satisfies `pred` (row updates arrive async of the reducer ack). */
@@ -463,6 +485,30 @@ export async function submitGuess(text: string): Promise<void> {
 export async function ensureInGame(code: string, username: string): Promise<void> {
   await connect();
   const target = code.toUpperCase();
-  if (useGameStore.getState().roomCode === target) return;
+  const s = useGameStore.getState();
+  if (s.roomCode === target && !s.isWatching) return;
   await joinGame(username, target);
+}
+
+/** Watch a room without playing — no username, no player row. */
+export async function watchGame(code: string): Promise<void> {
+  const c = await connect();
+  await c.reducers.watchGame({ code: code.toUpperCase() });
+}
+
+/** Stop watching (fire-and-forget — leaving the page is the common exit). */
+export function leaveWatch(): void {
+  conn?.reducers.leaveWatch({}).catch(() => {});
+}
+
+/**
+ * Watch-mode mirror of ensureInGame: after a refresh the identity's
+ * spectator row usually survives, so this is a no-op; otherwise watch.
+ * A player of `code` opening the watch URL stays a player.
+ */
+export async function ensureWatching(code: string): Promise<void> {
+  await connect();
+  const target = code.toUpperCase();
+  if (useGameStore.getState().roomCode === target) return;
+  await watchGame(target);
 }

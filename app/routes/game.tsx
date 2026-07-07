@@ -19,7 +19,9 @@ import {
   clearCanvas,
   endTurn,
   ensureInGame,
+  ensureWatching,
   leaveGame,
+  leaveWatch,
   playAgain,
   sendLiveStroke,
   sendStroke,
@@ -61,6 +63,10 @@ function useTurnCountdown(turnStartedAtMs: number | null, turnSeconds: number): 
   return Math.max(0, Math.ceil((turnStartedAtMs + turnSeconds * 1000 - now) / 1000));
 }
 
+export default function Game({ params }: Route.ComponentProps) {
+  return <GameScreen code={params.code.toUpperCase()} watch={false} />;
+}
+
 /**
  * The core loop screen: scoreboard (left), shared drawing surface (center),
  * guess feed (right). Everything renders from the SpacetimeDB mirror — the
@@ -68,10 +74,13 @@ function useTurnCountdown(turnStartedAtMs: number | null, turnSeconds: number): 
  * clients in real time. When the rounds run out the room flips to 'finished'
  * and this screen becomes the results: ranked scoreboard + a slideshow of
  * every drawing with funny/artistic/horrible voting.
+ *
+ * Also serves watch mode (`/watch/:code` sets the `watch` prop): spectators
+ * attach via their spectator row instead of a player row, get the same live
+ * mirror, and see a join CTA where the guess input would be.
  */
-export default function Game({ params }: Route.ComponentProps) {
+export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
   const navigate = useNavigate();
-  const code = params.code.toUpperCase();
   const identity = useGameStore(s => s.identity);
   const players = useGameStore(s => s.players);
   const room = useGameStore(s => s.room);
@@ -79,6 +88,10 @@ export default function Game({ params }: Route.ComponentProps) {
   const strokes = useGameStore(s => s.strokes);
   const liveStroke = useGameStore(s => s.liveStroke);
   const guesses = useGameStore(s => s.guesses);
+  // true while my presence in this room is a spectator row (a player opening
+  // the watch URL keeps playing — their player row wins)
+  const watching = useGameStore(s => s.isWatching);
+  const spectatorCount = useGameStore(s => s.spectatorCount);
 
   const [color, setColor] = useState(PALETTE[0]);
   const [threeD, setThreeD] = useState(false);
@@ -128,6 +141,7 @@ export default function Game({ params }: Route.ComponentProps) {
   // same refresh recovery as the lobby: persisted identity re-attaches to its
   // player row; a nameless direct visit goes to the menu with the code prefilled
   useEffect(() => {
+    if (watch) return;
     const name = useGameStore.getState().username || loadStoredUsername();
     if (!name) {
       navigate(`/?join=${code}`, { replace: true });
@@ -135,15 +149,25 @@ export default function Game({ params }: Route.ComponentProps) {
     }
     useGameStore.getState().setUsername(name);
     ensureInGame(code, name).catch(() => navigate(`/?join=${code}`, { replace: true }));
-  }, [code, navigate]);
+  }, [watch, code, navigate]);
+
+  // watch mode: attach as a spectator (no username needed). Spectator rows
+  // are dropped on disconnect, so the roomCode dep re-attaches after refresh
+  // races or the room dying mid-watch; a room that's truly gone (or a full
+  // gallery) bounces home.
+  useEffect(() => {
+    if (!watch) return;
+    ensureWatching(code).catch(() => navigate('/', { replace: true }));
+  }, [watch, code, roomCode, navigate]);
 
   // landed here before the host pressed start (deep link), or the host queued
-  // a rematch — either way the lobby is where 'waiting' rooms live
+  // a rematch — either way the lobby is where 'waiting' rooms live. Watchers
+  // have no seat in the lobby; they stay and see the waiting header.
   useEffect(() => {
-    if (roomCode === code && room?.status === 'waiting') {
+    if (!watching && roomCode === code && room?.status === 'waiting') {
       navigate(`/lobby/${code}`, { replace: true });
     }
-  }, [roomCode, room?.status, code, navigate]);
+  }, [watching, roomCode, room?.status, code, navigate]);
 
   useEffect(() => {
     feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight });
@@ -171,7 +195,19 @@ export default function Game({ params }: Route.ComponentProps) {
   const guessedThisTurn =
     !!playing &&
     guesses.some(g => g.correct && g.playerId === identity && g.turn === room.turn);
-  const canGuess = !!playing && !choosing && !isArtist && !guessedThisTurn;
+  const canGuess = !!playing && !choosing && !isArtist && !guessedThisTurn && !watching;
+
+  // watcher → player promotion: the newcomer is dealt into the rotation by
+  // the existing mid-game join path; nameless watchers detour via the menu
+  function joinFromWatch() {
+    const name = useGameStore.getState().username || loadStoredUsername();
+    if (!name) {
+      navigate(`/?join=${code}`);
+      return;
+    }
+    ensureInGame(code, name).catch(() => navigate(`/?join=${code}`));
+  }
+  const roomFull = !!room && room.playerCount >= room.maxPlayers;
 
   const secondsLeft = useTurnCountdown(
     playing && !choosing ? room.turnStartedAtMs : null,
@@ -243,9 +279,10 @@ export default function Game({ params }: Route.ComponentProps) {
 
   if (finished) {
     // the ad break runs between the buzzer and the results; the 'ad-free'
-    // shop perk (and a rematch reset) skip straight through. The moderation
-    // guard rides along so warnings land even on the results screen.
-    if (!adFree && !adWatched) {
+    // shop perk (and a rematch reset) skip straight through. Watchers skip it
+    // too — they may have just wandered in. The moderation guard rides along
+    // so warnings land even on the results screen.
+    if (!adFree && !adWatched && !watching) {
       return (
         <>
           <ModerationGuard />
@@ -256,7 +293,7 @@ export default function Game({ params }: Route.ComponentProps) {
     return (
       <>
         <ModerationGuard />
-        <GameOver code={code} />
+        <GameOver code={code} watching={watching} />
       </>
     );
   }
@@ -286,7 +323,9 @@ export default function Game({ params }: Route.ComponentProps) {
           <p className="text-xs uppercase tracking-widest text-stone-400">
             {playing
               ? `Round ${room.round}/${room.rounds} — ${artistName} is ${choosing ? 'picking a word' : 'drawing'}`
-              : 'waiting…'}
+              : watching
+                ? 'waiting for the host to start…'
+                : 'waiting…'}
           </p>
           <p className="whitespace-pre font-mono text-sm tracking-widest text-stone-600">
             {wordDisplay || ' '}
@@ -302,6 +341,14 @@ export default function Game({ params }: Route.ComponentProps) {
               }`}
             >
               0:{String(secondsLeft).padStart(2, '0')}
+            </span>
+          )}
+          {spectatorCount > 0 && (
+            <span
+              title={`${spectatorCount} watching`}
+              className="rounded-md border border-stone-200 bg-white px-2 py-1 font-mono text-xs tabular-nums text-stone-500"
+            >
+              👀 {spectatorCount}
             </span>
           )}
           <span className="rounded-md border border-stone-200 bg-white px-2 py-1 font-mono text-xs tracking-[0.2em] text-stone-500">
@@ -495,29 +542,50 @@ export default function Game({ params }: Route.ComponentProps) {
             )}
           </div>
           <div className="border-t border-stone-100 p-2 lg:p-3">
-            {guessError && (
-              <p className="mb-2 text-xs text-red-600">{guessError}</p>
+            {watching ? (
+              // spectators don't guess — that's what joining is for
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white px-3 py-2">
+                <span className="text-xs uppercase tracking-widest text-stone-400">
+                  👀 watching
+                </span>
+                {roomFull ? (
+                  <span className="text-xs italic text-stone-400">game is full</span>
+                ) : (
+                  <button
+                    onClick={joinFromWatch}
+                    className="rounded-md bg-stone-900 px-3 py-1.5 text-xs font-medium uppercase tracking-widest text-stone-50 transition hover:bg-stone-700"
+                  >
+                    Join this game
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
+                {guessError && (
+                  <p className="mb-2 text-xs text-red-600">{guessError}</p>
+                )}
+                <input
+                  value={guessDraft}
+                  onChange={e => {
+                    setGuessDraft(e.target.value);
+                    setGuessError('');
+                  }}
+                  onKeyDown={e => e.key === 'Enter' && handleGuess()}
+                  disabled={!canGuess}
+                  maxLength={64}
+                  placeholder={
+                    isArtist
+                      ? 'you’re drawing!'
+                      : choosing
+                        ? `${artistName} is picking a word…`
+                        : guessedThisTurn
+                          ? 'you got it — waiting for the rest'
+                          : 'type your guess…'
+                  }
+                  className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-stone-300 focus:border-stone-400 disabled:bg-stone-50"
+                />
+              </>
             )}
-            <input
-              value={guessDraft}
-              onChange={e => {
-                setGuessDraft(e.target.value);
-                setGuessError('');
-              }}
-              onKeyDown={e => e.key === 'Enter' && handleGuess()}
-              disabled={!canGuess}
-              maxLength={64}
-              placeholder={
-                isArtist
-                  ? 'you’re drawing!'
-                  : choosing
-                    ? `${artistName} is picking a word…`
-                    : guessedThisTurn
-                      ? 'you got it — waiting for the rest'
-                      : 'type your guess…'
-              }
-              className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-stone-300 focus:border-stone-400 disabled:bg-stone-50"
-            />
           </div>
         </aside>
       </div>
@@ -530,7 +598,7 @@ export default function Game({ params }: Route.ComponentProps) {
  * game. Each player gets one vote per category (funny / artistic / horrible);
  * votes land in SpacetimeDB so the tallies update live for everyone.
  */
-function GameOver({ code }: { code: string }) {
+function GameOver({ code, watching }: { code: string; watching: boolean }) {
   const navigate = useNavigate();
   const identity = useGameStore(s => s.identity);
   const players = useGameStore(s => s.players);
@@ -579,7 +647,8 @@ function GameOver({ code }: { code: string }) {
 
   async function handleLeave() {
     try {
-      await leaveGame();
+      if (watching) leaveWatch();
+      else await leaveGame();
     } catch {
       // best-effort — the server flips us offline on disconnect anyway
     }
@@ -636,7 +705,7 @@ function GameOver({ code }: { code: string }) {
               onClick={handleLeave}
               className="w-full rounded-lg border border-stone-200 bg-white py-2.5 text-sm text-stone-500 transition hover:text-stone-800"
             >
-              Leave game
+              {watching ? 'Stop watching' : 'Leave game'}
             </button>
           </div>
 
@@ -716,9 +785,11 @@ function GameOver({ code }: { code: string }) {
                   return (
                     <button
                       key={category}
+                      // watchers see the tallies but only players hold ballots
+                      disabled={watching}
                       onClick={() => castVote(current.turn, category).catch(() => {})}
-                      title={`vote ${label}`}
-                      className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition ${
+                      title={watching ? 'players vote — you’re watching' : `vote ${label}`}
+                      className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
                         mine
                           ? 'border-stone-900 bg-stone-900 text-stone-50'
                           : 'border-stone-200 bg-white text-stone-600 hover:border-stone-400'

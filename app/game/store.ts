@@ -92,6 +92,7 @@ export interface OpenGameInfo {
   playerCount: number;
   maxPlayers: number;
   hostName: string;
+  spectatorCount: number;
 }
 
 export interface ServerDigest {
@@ -103,6 +104,10 @@ export interface ServerDigest {
   votes: VoteInfo[];
   guesses: GuessInfo[];
   openGames: OpenGameInfo[];
+  /** True when the focused room comes from my spectator row, not a player row. */
+  isWatching: boolean;
+  /** Watchers of the focused room. */
+  spectatorCount: number;
 }
 
 function phaseFor(room: RoomInfo | null): GamePhase {
@@ -134,6 +139,10 @@ interface GameState {
   guesses: GuessInfo[];
   /** Public rooms anyone can browse into, newest first. */
   openGames: OpenGameInfo[];
+  /** I'm a spectator of the focused room (no player row — watch mode). */
+  isWatching: boolean;
+  /** Watchers of the focused room. */
+  spectatorCount: number;
   phase: GamePhase;
 
   setUsername: (name: string) => void;
@@ -155,6 +164,8 @@ const initialState = {
   votes: [] as VoteInfo[],
   guesses: [] as GuessInfo[],
   openGames: [] as OpenGameInfo[],
+  isWatching: false,
+  spectatorCount: 0,
   phase: 'menu' as GamePhase,
 };
 
@@ -166,7 +177,18 @@ export const useGameStore: UseBoundStore<StoreApi<GameState>> = create<GameState
   connectionChanged: (connection, identity) =>
     set(state => ({ connection, identity: identity ?? state.identity })),
 
-  serverSync: ({ room, players, strokes, liveStroke, drawings, votes, guesses, openGames }) =>
+  serverSync: ({
+    room,
+    players,
+    strokes,
+    liveStroke,
+    drawings,
+    votes,
+    guesses,
+    openGames,
+    isWatching,
+    spectatorCount,
+  }) =>
     set({
       room,
       players,
@@ -176,6 +198,8 @@ export const useGameStore: UseBoundStore<StoreApi<GameState>> = create<GameState
       votes,
       guesses,
       openGames,
+      isWatching,
+      spectatorCount,
       roomCode: room?.code ?? '',
       phase: phaseFor(room),
     }),

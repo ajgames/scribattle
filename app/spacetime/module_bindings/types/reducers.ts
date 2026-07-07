@@ -15,10 +15,12 @@ import CreateGameReducer from "../create_game_reducer";
 import EndTurnReducer from "../end_turn_reducer";
 import JoinGameReducer from "../join_game_reducer";
 import LeaveGameReducer from "../leave_game_reducer";
+import LeaveWatchReducer from "../leave_watch_reducer";
 import PlayAgainReducer from "../play_again_reducer";
 import StartGameReducer from "../start_game_reducer";
 import SubmitGuessReducer from "../submit_guess_reducer";
 import UpdateLiveStrokeReducer from "../update_live_stroke_reducer";
+import WatchGameReducer from "../watch_game_reducer";
 
 export type AddStrokeParams = __Infer<typeof AddStrokeReducer>;
 export type AutoPickWordParams = __Infer<typeof AutoPickWordReducer>;
@@ -29,8 +31,10 @@ export type CreateGameParams = __Infer<typeof CreateGameReducer>;
 export type EndTurnParams = __Infer<typeof EndTurnReducer>;
 export type JoinGameParams = __Infer<typeof JoinGameReducer>;
 export type LeaveGameParams = __Infer<typeof LeaveGameReducer>;
+export type LeaveWatchParams = __Infer<typeof LeaveWatchReducer>;
 export type PlayAgainParams = __Infer<typeof PlayAgainReducer>;
 export type StartGameParams = __Infer<typeof StartGameReducer>;
 export type SubmitGuessParams = __Infer<typeof SubmitGuessReducer>;
 export type UpdateLiveStrokeParams = __Infer<typeof UpdateLiveStrokeReducer>;
+export type WatchGameParams = __Infer<typeof WatchGameReducer>;
 

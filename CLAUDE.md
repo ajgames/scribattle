@@ -44,6 +44,7 @@ server/src/index.ts (reducers mutate tables)
 | `/` | `routes/home.tsx` | Username, create (public/private toggle), join by code, public games list |
 | `/lobby/:code` | `routes/lobby.tsx` | Waiting room, invite links (referral-tagged), host starts |
 | `/game/:code` | `routes/game.tsx` | Core loop screen + `GameOver` results/slideshow/voting; ad break between them |
+| `/watch/:code` | `routes/watch.tsx` | Watch mode — same `GameScreen`, spectator row instead of player row (no username, no ad break, join CTA; `spectator` table caps at 20/room, rows die on disconnect) |
 | `/shop` | `routes/shop.tsx` | Credits balance, referral link hub, buy catalog items |
 | `/admin` | `routes/admin.tsx` | Moderation dashboard — allowlisted admin emails only, 404 for everyone else |
 | `/sign-in`, `/sign-up` | `routes/sign-{in,up}.tsx` | Clerk pages (modals used mostly) |

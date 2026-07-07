@@ -291,9 +291,27 @@ export default function Home() {
                         live
                       </span>
                     )}
+                    {g.spectatorCount > 0 && (
+                      <span
+                        title={`${g.spectatorCount} watching`}
+                        className="text-xs tabular-nums text-stone-400"
+                      >
+                        👀 {g.spectatorCount}
+                      </span>
+                    )}
                     <span className="text-xs tabular-nums text-stone-400">
                       {g.playerCount}/{g.maxPlayers}
                     </span>
+                    {/* live games can be watched; a full room offers only that */}
+                    {g.status === 'playing' && (
+                      <button
+                        onClick={() => navigate(`/watch/${g.code}`)}
+                        disabled={busy !== null}
+                        className="rounded-md border border-stone-200 bg-white px-3 py-1 text-xs font-medium text-stone-500 transition enabled:hover:border-stone-900 enabled:hover:text-stone-900 disabled:opacity-40"
+                      >
+                        Watch
+                      </button>
+                    )}
                     {joinable ? (
                       <button
                         onClick={() => enterLobby(g.code)}

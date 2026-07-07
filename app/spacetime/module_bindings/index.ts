@@ -43,10 +43,12 @@ import CreateGameReducer from "./create_game_reducer";
 import EndTurnReducer from "./end_turn_reducer";
 import JoinGameReducer from "./join_game_reducer";
 import LeaveGameReducer from "./leave_game_reducer";
+import LeaveWatchReducer from "./leave_watch_reducer";
 import PlayAgainReducer from "./play_again_reducer";
 import StartGameReducer from "./start_game_reducer";
 import SubmitGuessReducer from "./submit_guess_reducer";
 import UpdateLiveStrokeReducer from "./update_live_stroke_reducer";
+import WatchGameReducer from "./watch_game_reducer";
 
 // Import all procedure arg schemas
 
@@ -57,6 +59,7 @@ import GameRow from "./game_table";
 import GuessRow from "./guess_table";
 import LiveStrokeRow from "./live_stroke_table";
 import PlayerRow from "./player_table";
+import SpectatorRow from "./spectator_table";
 import StrokeRow from "./stroke_table";
 import VoteRow from "./vote_table";
 import WordChoiceRow from "./word_choice_table";
@@ -140,6 +143,20 @@ const tablesSchema = __schema({
       { name: 'player_identity_key', constraint: 'unique', columns: ['identity'] },
     ],
   }, PlayerRow),
+  spectator: __table({
+    name: 'spectator',
+    indexes: [
+      { accessor: 'gameCode', name: 'spectator_game_code_idx_btree', algorithm: 'btree', columns: [
+        'gameCode',
+      ] },
+      { accessor: 'identity', name: 'spectator_identity_idx_btree', algorithm: 'btree', columns: [
+        'identity',
+      ] },
+    ],
+    constraints: [
+      { name: 'spectator_identity_key', constraint: 'unique', columns: ['identity'] },
+    ],
+  }, SpectatorRow),
   stroke: __table({
     name: 'stroke',
     indexes: [
@@ -192,10 +209,12 @@ const reducersSchema = __reducers(
   __reducerSchema("end_turn", EndTurnReducer),
   __reducerSchema("join_game", JoinGameReducer),
   __reducerSchema("leave_game", LeaveGameReducer),
+  __reducerSchema("leave_watch", LeaveWatchReducer),
   __reducerSchema("play_again", PlayAgainReducer),
   __reducerSchema("start_game", StartGameReducer),
   __reducerSchema("submit_guess", SubmitGuessReducer),
   __reducerSchema("update_live_stroke", UpdateLiveStrokeReducer),
+  __reducerSchema("watch_game", WatchGameReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

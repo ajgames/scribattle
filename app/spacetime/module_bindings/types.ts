@@ -75,6 +75,13 @@ export const Player = __t.object("Player", {
 });
 export type Player = __Infer<typeof Player>;
 
+export const Spectator = __t.object("Spectator", {
+  identity: __t.identity(),
+  gameCode: __t.string(),
+  joinedAt: __t.timestamp(),
+});
+export type Spectator = __Infer<typeof Spectator>;
+
 export const Stroke = __t.object("Stroke", {
   id: __t.u64(),
   gameCode: __t.string(),

@@ -50,6 +50,9 @@ const WORD_CHOICE_SECONDS = 10;
 // the sweep in connect/create/join (there's no scheduled reaper yet)
 const STALE_GAME_MICROS = 5n * 60n * 1_000_000n;
 
+/** Watchers per room — they're cheap, but unbounded is never a good default. */
+const MAX_SPECTATORS = 20;
+
 const VOTE_CATEGORIES = ['funny', 'artistic', 'horrible'] as const;
 
 // curated drawable-noun pack — flat difficulty for now (tiers later)
@@ -211,6 +214,22 @@ const drawing = table(
 );
 
 /**
+ * Watch mode: one row per spectator, keyed by identity like `player` (you
+ * watch one room at a time). Spectators receive everything players do —
+ * every table is public — this row just makes them *visible* ("N watching")
+ * and gives join/leave/disconnect a hook. They never appear in `playersIn`,
+ * so scoring, turn rotation, and the stale sweep ignore them by construction.
+ */
+const spectator = table(
+  { name: 'spectator', public: true },
+  {
+    identity: t.identity().primaryKey(),
+    gameCode: t.string().index('btree'),
+    joinedAt: t.timestamp(),
+  }
+);
+
+/**
  * Slideshow ballots: each voter gets one pick per category ('funny' |
  * 'artistic' | 'horrible'); re-voting moves it, voting the same drawing
  * again retracts it.
@@ -282,6 +301,7 @@ const spacetimedb = schema({
   guess,
   wordChoice,
   activity,
+  spectator,
 });
 
 function randomCode(ctx: { random(): number }): string {
@@ -359,6 +379,7 @@ function expireStaleGames(ctx: Ctx) {
     ctx.db.game.code.delete(room.code);
     deleteGameArtifacts(ctx, room.code);
     ctx.db.activity.gameCode.delete(room.code);
+    ctx.db.spectator.gameCode.delete(room.code);
   }
 }
 
@@ -441,6 +462,10 @@ function advanceTurn(ctx: Ctx, room: GameRow): GameRow {
  * a stale row or player count.
  */
 function detachFromGame(ctx: Ctx) {
+  // whatever the sender does next (create/join/watch/leave), they stop
+  // being a spectator of wherever they were
+  ctx.db.spectator.identity.delete(ctx.sender);
+
   const me = ctx.db.player.identity.find(ctx.sender);
   if (!me) return;
   ctx.db.player.identity.delete(ctx.sender);
@@ -453,6 +478,7 @@ function detachFromGame(ctx: Ctx) {
     ctx.db.game.code.delete(room.code);
     deleteGameArtifacts(ctx, room.code);
     ctx.db.activity.gameCode.delete(room.code);
+    ctx.db.spectator.gameCode.delete(room.code);
     return;
   }
   let updated = { ...room, playerCount: remaining.length };
@@ -552,6 +578,37 @@ export const joinGame = spacetimedb.reducer(
 
 export const leaveGame = spacetimedb.reducer(ctx => {
   detachFromGame(ctx);
+});
+
+/**
+ * Watch a room without playing: no username needed, no player row — just a
+ * visible "N watching" presence. Any room status is watchable (the client
+ * renders waiting/playing/finished appropriately). Watching detaches the
+ * sender from any game they were in, same as create/join.
+ */
+export const watchGame = spacetimedb.reducer({ code: t.string() }, (ctx, { code }) => {
+  const room = ctx.db.game.code.find(code.toUpperCase());
+  if (!room) throw new SenderError('Game not found — check the code');
+
+  // already watching this room (refresh) — idempotent
+  const existing = ctx.db.spectator.identity.find(ctx.sender);
+  if (existing && existing.gameCode === room.code) return;
+
+  let count = 0;
+  for (const _ of ctx.db.spectator.gameCode.filter(room.code)) {
+    if (++count >= MAX_SPECTATORS) throw new SenderError('The gallery is full');
+  }
+
+  detachFromGame(ctx);
+  ctx.db.spectator.insert({
+    identity: ctx.sender,
+    gameCode: room.code,
+    joinedAt: ctx.timestamp,
+  });
+});
+
+export const leaveWatch = spacetimedb.reducer(ctx => {
+  ctx.db.spectator.identity.delete(ctx.sender);
 });
 
 /** Host kicks off the game: round 1, turn 1, host draws first. */
@@ -839,6 +896,10 @@ export const onConnect = spacetimedb.clientConnected(ctx => {
 });
 
 export const onDisconnect = spacetimedb.clientDisconnected(ctx => {
+  // spectators are ephemeral — no reconnect semantics, a returning watcher
+  // just watches again
+  ctx.db.spectator.identity.delete(ctx.sender);
+
   const me = ctx.db.player.identity.find(ctx.sender);
   if (!me || !me.online) return;
   ctx.db.player.identity.update({ ...me, online: false });

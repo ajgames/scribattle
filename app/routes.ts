@@ -7,6 +7,7 @@ export default [
   route("how-to-play", "routes/how-to-play.tsx"),
   route("lobby/:code", "routes/lobby.tsx"),
   route("game/:code", "routes/game.tsx"),
+  route("watch/:code", "routes/watch.tsx"),
   route("shop", "routes/shop.tsx"),
   route("admin", "routes/admin.tsx"),
   route("sign-in/*", "routes/sign-in.tsx"),
