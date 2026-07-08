@@ -16,7 +16,10 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "db:migrate:prod": "drizzle-kit migrate --config=drizzle.config.prod.ts",
+    "db:push:prod": "drizzle-kit push --config=drizzle.config.prod.ts",
+    "db:studio:prod": "drizzle-kit studio --config=drizzle.config.prod.ts"
   },
   "dependencies": {
     "@clerk/react-router": "^3.5.4",

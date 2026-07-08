@@ -10,8 +10,8 @@
 # Server build output
 /server/dist/
 
-# Drizzle
-/database/migrations/meta/
+# Drizzle: migration SQL + meta/ (journal & snapshots) are tracked so prod
+# migrations are reproducible from a clean checkout.
 
 # local-only architecture reference (its own git repo)
 /realtime-example-battleroll/
