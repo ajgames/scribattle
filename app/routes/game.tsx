@@ -37,12 +37,21 @@ export function meta({ params }: Route.MetaArgs) {
 }
 
 const PALETTE = ['#1c1917', '#dc2626', '#2563eb', '#16a34a', '#d97706'];
-const BRUSH_WIDTH = 0.007; // normalized to paper width, matches server clamps
-const FAT_BRUSH_WIDTH = 0.016; // 'fat-cap' shop unlock — still inside server clamps
+// brush nibs, normalized to paper width (server clamps 0.005–0.1); S/M/L are
+// free, the 'fat-cap' shop unlock adds the XL nib
+const BRUSH_SIZES = [
+  { id: 's', width: 0.005 },
+  { id: 'm', width: 0.007 },
+  { id: 'l', width: 0.012 },
+];
+const FAT_CAP_SIZE = { id: 'xl', width: 0.02 };
+const DEFAULT_BRUSH_WIDTH = BRUSH_SIZES[1].width;
 // the eraser is just paper-colored ink (see DrawCanvas's paper material) —
-// a wide flat stroke that paints sections away for everyone, replays included
+// a wide flat stroke that paints sections away for everyone, replays included.
+// It rides the size picker: 3× the selected nib (capped at the server clamp).
 const PAPER_COLOR = '#ffffff';
-const ERASER_WIDTH = 0.022;
+const ERASER_SCALE = 3;
+const MAX_STROKE_WIDTH = 0.1;
 
 const VOTE_BUTTONS: { category: VoteCategory; emoji: string; label: string }[] = [
   { category: 'funny', emoji: '😂', label: 'funny' },
@@ -94,8 +103,9 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
   const spectatorCount = useGameStore(s => s.spectatorCount);
 
   const [color, setColor] = useState(PALETTE[0]);
+  const [customColor, setCustomColor] = useState('#7c3aed');
   const [threeD, setThreeD] = useState(false);
-  const [fatBrush, setFatBrush] = useState(false);
+  const [sizeId, setSizeId] = useState('m');
   const [eraser, setEraser] = useState(false);
   const [guessDraft, setGuessDraft] = useState('');
   const [guessError, setGuessError] = useState('');
@@ -116,13 +126,14 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
   );
   const hasFatCap = unlockIds.includes('fat-cap');
   const adFree = unlockIds.includes(AD_FREE_ITEM_ID);
+  const brushSizes = hasFatCap ? [...BRUSH_SIZES, FAT_CAP_SIZE] : BRUSH_SIZES;
+  const nibWidth =
+    brushSizes.find(s => s.id === sizeId)?.width ?? DEFAULT_BRUSH_WIDTH;
   // the eraser overrides the ink: paper-colored, wide, and always flat (a
   // raised 3D "erase" would cast shadows over the drawing)
   const brushWidth = eraser
-    ? ERASER_WIDTH
-    : hasFatCap && fatBrush
-      ? FAT_BRUSH_WIDTH
-      : BRUSH_WIDTH;
+    ? Math.min(nibWidth * ERASER_SCALE, MAX_STROKE_WIDTH)
+    : nibWidth;
   const brushColor = eraser ? PAPER_COLOR : color;
   const brushThreeD = !eraser && threeD;
 
@@ -303,7 +314,9 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
     // and the keyboard): the guess feed scrolls inside its panel and the
     // input stays pinned, instead of chat growing the page and pushing the
     // submit box out of view
-    <main className="flex h-dvh flex-col bg-[#f7f5f1] text-stone-900">
+    // touch-manipulation blocks double-tap zoom everywhere (scrolling still
+    // works) — stray taps around the canvas shouldn't zoom the page on iPad
+    <main className="flex h-dvh touch-manipulation flex-col overscroll-none bg-[#f7f5f1] text-stone-900">
       <ModerationGuard />
       {reporting && playing && (
         <ReportModal
@@ -396,7 +409,7 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
         {/* drawing surface — R3F canvas (WebGL, client-only) */}
         {/* min-h-0 lets the canvas give ground to the feed/keyboard on
             phones instead of forcing the page to scroll */}
-        <section className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+        <section className="relative min-h-0 flex-1 select-none overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
           <ClientOnly
             fallback={<div className="flex h-full items-center justify-center text-sm text-stone-400">warming up the easel…</div>}
           >
@@ -451,7 +464,9 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
           )}
 
           {isArtist ? (
-            <div className="absolute bottom-3 left-1/2 flex max-w-[calc(100%-1rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-full border border-stone-200 bg-white/90 px-4 py-2 shadow-sm">
+            // touch-manipulation kills iPad's double-tap zoom on rapid tool
+            // taps; pointer-coarse: grows every target to finger/stylus size
+            <div className="absolute bottom-3 left-1/2 flex max-w-[calc(100%-1rem)] -translate-x-1/2 touch-manipulation select-none flex-wrap items-center justify-center gap-2 rounded-full border border-stone-200 bg-white/90 px-4 py-2 shadow-sm pointer-coarse:gap-2.5 pointer-coarse:py-2.5">
               {palette.map(c => (
                 <button
                   key={c}
@@ -460,7 +475,7 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
                     setEraser(false);
                   }}
                   aria-label={`brush color ${c}`}
-                  className={`size-5 rounded-full border transition ${
+                  className={`size-5 rounded-full border transition pointer-coarse:size-8 ${
                     color === c && !eraser
                       ? 'scale-125 border-stone-900'
                       : 'border-stone-200 hover:scale-110'
@@ -468,10 +483,68 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
                   style={{ backgroundColor: c }}
                 />
               ))}
+              {/* custom ink — the rainbow ring opens the native color picker */}
+              <label
+                title="custom color"
+                className={`relative size-5 cursor-pointer rounded-full border transition pointer-coarse:size-8 ${
+                  color === customColor && !eraser
+                    ? 'scale-125 border-stone-900'
+                    : 'border-stone-200 hover:scale-110'
+                }`}
+                style={{
+                  background:
+                    'conic-gradient(#ef4444,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#ef4444)',
+                }}
+              >
+                <span
+                  className="absolute inset-1 rounded-full"
+                  style={{ backgroundColor: customColor }}
+                />
+                <input
+                  type="color"
+                  value={customColor}
+                  aria-label="pick a custom color"
+                  onClick={() => {
+                    // tapping the swatch re-selects the last custom ink even
+                    // if the picker closes without a change
+                    setColor(customColor);
+                    setEraser(false);
+                  }}
+                  onChange={e => {
+                    setCustomColor(e.target.value);
+                    setColor(e.target.value);
+                    setEraser(false);
+                  }}
+                  className="absolute inset-0 size-full cursor-pointer opacity-0"
+                />
+              </label>
+              <span className="mx-1 h-5 w-px bg-stone-200" />
+              {/* nib sizes — dots drawn to scale; XL is the fat-cap unlock */}
+              {brushSizes.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => setSizeId(s.id)}
+                  title={
+                    s.id === 'xl' ? 'fat cap (shop unlock)' : `brush size ${s.id}`
+                  }
+                  aria-label={`brush size ${s.id}`}
+                  className={`flex size-6 items-center justify-center rounded-full border transition pointer-coarse:size-8 ${
+                    sizeId === s.id
+                      ? 'border-stone-900 bg-stone-100'
+                      : 'border-transparent hover:bg-stone-100'
+                  }`}
+                >
+                  <span
+                    className="rounded-full bg-stone-800"
+                    style={{ width: 3 + s.width * 600, height: 3 + s.width * 600 }}
+                  />
+                </button>
+              ))}
+              <span className="mx-1 h-5 w-px bg-stone-200" />
               <button
                 onClick={() => setEraser(v => !v)}
                 title="eraser — paint sections away"
-                className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-widest transition ${
+                className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-widest transition pointer-coarse:px-3 pointer-coarse:py-1.5 ${
                   eraser
                     ? 'bg-stone-900 text-stone-50'
                     : 'text-stone-400 hover:text-stone-700'
@@ -479,11 +552,10 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
               >
                 Erase
               </button>
-              <span className="mx-1 h-5 w-px bg-stone-200" />
               <button
                 onClick={() => setThreeD(v => !v)}
                 title="raised 3D ink"
-                className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-widest transition ${
+                className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-widest transition pointer-coarse:px-3 pointer-coarse:py-1.5 ${
                   threeD
                     ? 'bg-stone-900 text-stone-50'
                     : 'text-stone-400 hover:text-stone-700'
@@ -491,23 +563,10 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
               >
                 3D
               </button>
-              {hasFatCap && (
-                <button
-                  onClick={() => setFatBrush(v => !v)}
-                  title="fat cap brush (shop unlock)"
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-widest transition ${
-                    fatBrush
-                      ? 'bg-stone-900 text-stone-50'
-                      : 'text-stone-400 hover:text-stone-700'
-                  }`}
-                >
-                  Fat
-                </button>
-              )}
               <span className="mx-1 h-5 w-px bg-stone-200" />
               <button
                 onClick={() => clearCanvas().catch(() => {})}
-                className="text-xs uppercase tracking-widest text-stone-400 transition hover:text-stone-700"
+                className="rounded-full px-1 text-xs uppercase tracking-widest text-stone-400 transition hover:text-stone-700 pointer-coarse:px-2 pointer-coarse:py-1.5"
               >
                 clear
               </button>
@@ -767,7 +826,7 @@ function GameOver({ code, watching }: { code: string; watching: boolean }) {
                     strokes={slideStrokes}
                     canDraw={false}
                     color="#1c1917"
-                    width={BRUSH_WIDTH}
+                    width={DEFAULT_BRUSH_WIDTH}
                     onStrokeEnd={() => {}}
                   />
                 </ClientOnly>

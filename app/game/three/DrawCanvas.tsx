@@ -29,9 +29,15 @@ const INK_LIFT = 0.02; // ink floats a hair above the paper
 const LIFT_STEP = 0.0012;
 // skip pointer samples closer than this (normalized) — keeps curves smooth
 // and stroke payloads small
-const MIN_SAMPLE_DIST = 0.008;
+const MIN_SAMPLE_DIST = 0.005;
 const MAX_POINTS_PER_STROKE = 2048; // pairs with the server's float cap
 const PROGRESS_INTERVAL_MS = 100; // live-stroke stream rate (~10 fps)
+// palm rejection: after any stylus contact/hover, finger touches don't paint
+// for this long (a resting palm between pen strokes would otherwise scribble)
+const PEN_PRIORITY_MS = 10_000;
+// a second finger landing this soon after the first means a pinch/system
+// gesture, not a stroke — throw the accidental mark away
+const PINCH_GRACE_MS = 150;
 
 /** World-space paper extents that exactly fill the camera's view. */
 function usePaperSize(): [number, number] {
@@ -248,6 +254,12 @@ export function DrawCanvas({
   const wrapRef = useRef<HTMLDivElement>(null);
   // the in-progress stroke — ref for appending, state for rendering
   const drawing = useRef<number[] | null>(null);
+  // the one pointer allowed to paint — extra fingers/palms are bystanders
+  const activePointer = useRef<number | null>(null);
+  const activePointerType = useRef('');
+  const strokeStartedAt = useRef(0);
+  // last time a stylus touched or hovered — gates touch input (palm rejection)
+  const lastPenAt = useRef(-Infinity);
   const lastProgressAt = useRef(0);
   const [draft, setDraft] = useState<number[] | null>(null);
   // released strokes awaiting their server echo (see PendingStroke)
@@ -290,10 +302,24 @@ export function DrawCanvas({
   useEffect(() => {
     if (!canDraw) {
       drawing.current = null;
+      activePointer.current = null;
       setDraft(null);
       setPending([]);
     }
   }, [canDraw]);
+
+  // throw away the in-flight stroke without committing it (palm marks, pinch
+  // gestures) — and retract the live preview other players already saw
+  function cancelStroke() {
+    drawing.current = null;
+    activePointer.current = null;
+    if (draftRaf.current) {
+      cancelAnimationFrame(draftRaf.current);
+      draftRaf.current = 0;
+    }
+    setDraft(null);
+    onStrokeProgress?.([]);
+  }
 
   function samplePoint(e: { clientX: number; clientY: number }): [number, number] {
     const rect = wrapRef.current!.getBoundingClientRect();
@@ -305,16 +331,43 @@ export function DrawCanvas({
 
   function handleDown(e: React.PointerEvent) {
     if (!canDraw || e.button !== 0) return;
+    if (e.pointerType === 'pen') lastPenAt.current = performance.now();
+    // palm rejection: while the stylus is in active use, fingers don't paint
+    if (e.pointerType === 'touch' && performance.now() - lastPenAt.current < PEN_PRIORITY_MS) {
+      return;
+    }
+    if (activePointer.current != null) {
+      if (e.pointerType === 'pen') {
+        // the palm usually lands a beat before the pencil tip — scrap the
+        // palm's stroke and let the pen take over
+        cancelStroke();
+      } else if (
+        activePointerType.current === 'touch' &&
+        performance.now() - strokeStartedAt.current < PINCH_GRACE_MS
+      ) {
+        // two fingers down almost together = a pinch, not a drawing
+        cancelStroke();
+        return;
+      } else {
+        return; // extra fingers don't get a second brush
+      }
+    }
     try {
       wrapRef.current?.setPointerCapture(e.pointerId);
     } catch {
       // synthetic pointers (tests, some pens) can't be captured — draw anyway
     }
+    activePointer.current = e.pointerId;
+    activePointerType.current = e.pointerType;
+    strokeStartedAt.current = performance.now();
     drawing.current = [...samplePoint(e)];
     setDraft(drawing.current.slice());
   }
 
   function handleMove(e: React.PointerEvent) {
+    // hover counts too — an approaching pencil locks out the settling palm
+    if (e.pointerType === 'pen') lastPenAt.current = performance.now();
+    if (e.pointerId !== activePointer.current) return;
     const pts = drawing.current;
     if (!pts) return;
     // coalesced events recover the full-rate pointer path the browser batched
@@ -344,6 +397,8 @@ export function DrawCanvas({
   }
 
   function handleUp(e: React.PointerEvent) {
+    if (e.pointerId !== activePointer.current) return;
+    activePointer.current = null;
     const pts = drawing.current;
     drawing.current = null;
     if (draftRaf.current) {
@@ -379,6 +434,10 @@ export function DrawCanvas({
         position: 'absolute',
         inset: 0,
         touchAction: 'none',
+        // long-pressing paper shouldn't summon iOS text selection / callouts
+        WebkitTouchCallout: 'none',
+        WebkitUserSelect: 'none',
+        userSelect: 'none',
         cursor: canDraw ? 'crosshair' : 'default',
       }}
     >
