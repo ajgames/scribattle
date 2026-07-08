@@ -298,6 +298,22 @@ export function DrawCanvas({
     []
   );
 
+  // iPadOS: a stylus double-tap on the paper is a "select/copy image"
+  // gesture that touch-action/user-select don't cover — swallow the raw
+  // touch defaults entirely (drawing runs on pointer events, which still
+  // fire; React can't attach non-passive touch listeners, hence native)
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const swallow = (e: TouchEvent) => e.preventDefault();
+    el.addEventListener('touchstart', swallow, { passive: false });
+    el.addEventListener('touchend', swallow, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', swallow);
+      el.removeEventListener('touchend', swallow);
+    };
+  }, []);
+
   // dropping the brush mid-stroke (artist rotated away) shouldn't strand ink
   useEffect(() => {
     if (!canDraw) {
@@ -445,6 +461,14 @@ export function DrawCanvas({
         flat
         camera={{ position: [0, CAM_HEIGHT, 0], fov: CAM_FOV, up: [0, 0, -1] }}
         onCreated={({ camera }) => camera.lookAt(0, 0, 0)}
+        // the canvas is a replaced element — Safari's select/copy gestures
+        // target it directly, so it needs its own blockers too
+        style={{
+          touchAction: 'none',
+          WebkitTouchCallout: 'none',
+          WebkitUserSelect: 'none',
+          userSelect: 'none',
+        }}
       >
         <color attach="background" args={['#f7f5f1']} />
         <SizeSync target={wrapRef} />
