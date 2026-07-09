@@ -6,6 +6,7 @@ import {
   AD_SECONDS_MEMBER,
   REFERRAL_REWARD,
 } from '../lib/catalog';
+import { AdSenseUnit } from './AdSenseUnit';
 
 /**
  * Post-match interstitial: a house-ad placeholder (swap in a real ad network
@@ -33,12 +34,10 @@ export function AdBreak({ onDone }: { onDone: () => void }) {
         Ad break — results in a moment
       </p>
 
-      {/* placeholder ad slot: this box is where the ad network unit mounts */}
-      <div className="flex aspect-video w-full max-w-lg flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-stone-300 bg-white shadow-sm">
-        <span className="rounded border border-stone-200 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-stone-400">
-          Advertisement
-        </span>
-        <p className="font-serif text-3xl tracking-tight text-stone-300">Your ad here</p>
+      {/* the live AdSense unit mounts here (house-ad placeholder until a slot
+          is configured / on unapproved origins like localhost) */}
+      <div className="flex aspect-video w-full max-w-lg items-center justify-center overflow-hidden rounded-xl border border-dashed border-stone-300 bg-white shadow-sm">
+        <AdSenseUnit className="h-full w-full" />
       </div>
 
       <button
@@ -49,16 +48,18 @@ export function AdBreak({ onDone }: { onDone: () => void }) {
         {skippable ? 'See the results →' : `Skip in ${secondsLeft}…`}
       </button>
 
-      {/* the upsell ladder: guest → free account; member → ad-free + referrals */}
+      {/* the upsell ladder: guest → free account; member → referrals
+          (ad-free upsell pulled until the perk is fully built out) */}
       <div className="w-full max-w-lg rounded-xl border border-stone-200 bg-white/70 px-5 py-4 text-center text-sm text-stone-600">
         {isSignedIn ? (
           <p>
-            Tired of ads?{' '}
+            Share your invite link — every friend who signs up earns you{' '}
+            <span className="font-medium">{REFERRAL_REWARD} credits</span> toward
+            skins and artist tools in the{' '}
             <Link to="/shop" className="font-medium text-stone-900 underline">
-              Go ad-free in the shop
-            </Link>{' '}
-            — share your invite link and every friend who signs up earns you{' '}
-            <span className="font-medium">{REFERRAL_REWARD} credits</span> toward it.
+              shop
+            </Link>
+            .
           </p>
         ) : (
           <p>

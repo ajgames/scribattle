@@ -14,6 +14,16 @@ export const WELCOME_BONUS = 25;
 export const AD_SECONDS_GUEST = 8;
 export const AD_SECONDS_MEMBER = 3;
 
+/**
+ * Google AdSense identifiers for the post-match interstitial unit.
+ * The publisher id matches the loader/meta tag in `root.tsx`. `AD_SLOT_POST_GAME`
+ * is the `data-ad-slot` of a display ad unit created in the AdSense dashboard
+ * (Ads → By ad unit → Display ads). Empty until a real slot is filled in;
+ * `AdSenseUnit` renders its house-ad placeholder instead of a live unit when it is.
+ */
+export const ADSENSE_CLIENT = 'ca-pub-3025736277635211';
+export const AD_SLOT_POST_GAME = '1571449575';
+
 export type ShopItemKind = 'perk' | 'skin' | 'tool';
 
 export interface ShopItem {
