@@ -179,6 +179,12 @@ const stroke = table(
     points: t.array(t.f32()),
     color: t.string(),
     width: t.f32(),
+    /**
+     * Per-point half-width (one per x,y pair), normalized to paper width —
+     * how pressure/speed/taper pens vary thickness along the stroke. Empty
+     * for uniform strokes (and legacy rows), where `width` alone applies.
+     */
+    widths: t.array(t.f32()),
     /** Raised 3D tube (artist toggle) vs the default flat ink. */
     threeD: t.bool(),
   }
@@ -196,6 +202,8 @@ const liveStroke = table(
     points: t.array(t.f32()),
     color: t.string(),
     width: t.f32(),
+    /** Per-point half-widths, mirrors the committed stroke's `widths`. */
+    widths: t.array(t.f32()),
     threeD: t.bool(),
   }
 );
@@ -636,6 +644,10 @@ function requireArtist(ctx: Ctx): GameRow {
   return room;
 }
 
+// tapered pen ends taper toward a point, so per-point widths clamp far below
+// the nominal nib floor (0.005) — this is only the anti-garbage guard.
+const MIN_POINT_WIDTH = 0.0002;
+
 function validateStroke(points: number[], color: string, width: number): number {
   if (points.length < 2 || points.length % 2 !== 0 || points.length > MAX_STROKE_FLOATS) {
     throw new SenderError('Bad stroke data');
@@ -644,13 +656,31 @@ function validateStroke(points: number[], color: string, width: number): number 
   return Math.min(Math.max(width, 0.005), 0.1);
 }
 
+/**
+ * Per-point widths are optional: empty means a uniform stroke (use `width`).
+ * When present there must be exactly one per point (x,y pair); each is clamped
+ * to a sane range so a tampered client can't request absurd geometry.
+ */
+function validateWidths(points: number[], widths: number[]): number[] {
+  if (widths.length === 0) return widths;
+  if (widths.length !== points.length / 2) throw new SenderError('Bad stroke widths');
+  return widths.map(w => Math.min(Math.max(w, MIN_POINT_WIDTH), 0.1));
+}
+
 /** Artist paints one finished stroke; everyone renders it from the table. */
 export const addStroke = spacetimedb.reducer(
-  { points: t.array(t.f32()), color: t.string(), width: t.f32(), threeD: t.bool() },
-  (ctx, { points, color, width, threeD }) => {
+  {
+    points: t.array(t.f32()),
+    color: t.string(),
+    width: t.f32(),
+    widths: t.array(t.f32()),
+    threeD: t.bool(),
+  },
+  (ctx, { points, color, width, widths, threeD }) => {
     const room = requireArtist(ctx);
     if (points.length < 4) throw new SenderError('Bad stroke data');
     const w = validateStroke(points, color, width);
+    const ws = validateWidths(points, widths);
 
     let count = 0;
     for (const s of ctx.db.stroke.gameCode.filter(room.code)) {
@@ -666,6 +696,7 @@ export const addStroke = spacetimedb.reducer(
       points,
       color,
       width: w,
+      widths: ws,
       threeD,
     });
     // the committed stroke supersedes the live preview
@@ -678,15 +709,22 @@ export const addStroke = spacetimedb.reducer(
  * watches it grow. Empty points = the stroke was abandoned; drop the preview.
  */
 export const updateLiveStroke = spacetimedb.reducer(
-  { points: t.array(t.f32()), color: t.string(), width: t.f32(), threeD: t.bool() },
-  (ctx, { points, color, width, threeD }) => {
+  {
+    points: t.array(t.f32()),
+    color: t.string(),
+    width: t.f32(),
+    widths: t.array(t.f32()),
+    threeD: t.bool(),
+  },
+  (ctx, { points, color, width, widths, threeD }) => {
     const room = requireArtist(ctx);
     if (points.length === 0) {
       ctx.db.liveStroke.gameCode.delete(room.code);
       return;
     }
     const w = validateStroke(points, color, width);
-    const row = { gameCode: room.code, points, color, width: w, threeD };
+    const ws = validateWidths(points, widths);
+    const row = { gameCode: room.code, points, color, width: w, widths: ws, threeD };
     if (ctx.db.liveStroke.gameCode.find(room.code)) {
       ctx.db.liveStroke.gameCode.update(row);
     } else {

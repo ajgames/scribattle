@@ -294,6 +294,7 @@ function sync() {
       points: Array.from(s.points),
       color: s.color,
       width: s.width,
+      widths: Array.from(s.widths),
       threeD: s.threeD,
     }));
 
@@ -303,6 +304,7 @@ function sync() {
         points: Array.from(liveRow.points),
         color: liveRow.color,
         width: liveRow.width,
+        widths: Array.from(liveRow.widths),
         threeD: liveRow.threeD,
       }
     : null;
@@ -411,10 +413,11 @@ export async function sendStroke(
   points: number[],
   color: string,
   width: number,
+  widths: number[],
   threeD: boolean
 ): Promise<void> {
   const c = await connect();
-  await c.reducers.addStroke({ points, color, width, threeD });
+  await c.reducers.addStroke({ points, color, width, widths, threeD });
 }
 
 /**
@@ -426,9 +429,10 @@ export function sendLiveStroke(
   points: number[],
   color: string,
   width: number,
+  widths: number[],
   threeD: boolean
 ): void {
-  conn?.reducers.updateLiveStroke({ points, color, width, threeD }).catch(() => {
+  conn?.reducers.updateLiveStroke({ points, color, width, widths, threeD }).catch(() => {
     // preview-only traffic — a rejected frame (turn just rotated) is harmless
   });
 }

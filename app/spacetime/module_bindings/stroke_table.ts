@@ -17,5 +17,6 @@ export default __t.row({
   points: __t.array(__t.f32()),
   color: __t.string(),
   width: __t.f32(),
+  widths: __t.array(__t.f32()),
   threeD: __t.bool().name("three_d"),
 });

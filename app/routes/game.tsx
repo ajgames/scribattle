@@ -4,7 +4,7 @@ import { AdBreak } from '../components/AdBreak';
 import { ClientOnly } from '../components/ClientOnly';
 import { ModerationGuard } from '../components/ModerationGuard';
 import { ReportModal } from '../components/ReportModal';
-import { DrawCanvas } from '../game/three/DrawCanvas';
+import { DrawCanvas, type PenStyle } from '../game/three/DrawCanvas';
 import { hintedWordDisplay } from '../game/hints';
 import { loadStoredUsername } from '../game/names';
 import { useGameStore, type VoteCategory } from '../game/store';
@@ -36,7 +36,25 @@ export function meta({ params }: Route.MetaArgs) {
   return pageMeta({ title: `Game ${params.code} — Scribattle`, noindex: true });
 }
 
-const PALETTE = ['#1c1917', '#dc2626', '#2563eb', '#16a34a', '#d97706'];
+// a balanced base wheel that all reads on the white paper — charcoal, red,
+// orange, amber, green, blue, purple, pink (skin-pack unlocks add more)
+const PALETTE = [
+  '#1c1917',
+  '#dc2626',
+  '#ea580c',
+  '#d97706',
+  '#16a34a',
+  '#2563eb',
+  '#7c3aed',
+  '#db2777',
+];
+// dynamic-thickness pens surfaced in the tool drawer
+const PEN_STYLES: { id: PenStyle; label: string; hint: string }[] = [
+  { id: 'uniform', label: 'Uniform', hint: 'constant width' },
+  { id: 'pressure', label: 'Pressure', hint: 'stylus force' },
+  { id: 'speed', label: 'Speed', hint: 'faster = thinner' },
+  { id: 'taper', label: 'Taper', hint: 'thin ends' },
+];
 // brush nibs, normalized to paper width (server clamps 0.005–0.1); S/M/L are
 // free, the 'fat-cap' shop unlock adds the XL nib
 const BRUSH_SIZES = [
@@ -103,8 +121,10 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
   const spectatorCount = useGameStore(s => s.spectatorCount);
 
   const [color, setColor] = useState(PALETTE[0]);
-  const [customColor, setCustomColor] = useState('#7c3aed');
+  const [customColor, setCustomColor] = useState('#0891b2');
   const [threeD, setThreeD] = useState(false);
+  const [penStyle, setPenStyle] = useState<PenStyle>('uniform');
+  const [penMenuOpen, setPenMenuOpen] = useState(false);
   const [sizeId, setSizeId] = useState('m');
   const [eraser, setEraser] = useState(false);
   const [guessDraft, setGuessDraft] = useState('');
@@ -136,6 +156,9 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
     : nibWidth;
   const brushColor = eraser ? PAPER_COLOR : color;
   const brushThreeD = !eraser && threeD;
+  // the eraser lays down flat, constant-width paper ink — dynamic pens only
+  // shape real drawing strokes
+  const brushPen: PenStyle = eraser ? 'uniform' : penStyle;
 
   // one ad break per match end. The flag rides sessionStorage so refreshing
   // the results screen doesn't replay the break; any live non-finished status
@@ -419,12 +442,13 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
               canDraw={isArtist}
               color={brushColor}
               width={brushWidth}
+              penStyle={brushPen}
               threeD={brushThreeD}
-              onStrokeProgress={points => {
-                sendLiveStroke(points, brushColor, brushWidth, brushThreeD);
+              onStrokeProgress={(points, widths) => {
+                sendLiveStroke(points, brushColor, brushWidth, widths, brushThreeD);
               }}
-              onStrokeEnd={points => {
-                sendStroke(points, brushColor, brushWidth, brushThreeD).catch(() => {
+              onStrokeEnd={(points, widths) => {
+                sendStroke(points, brushColor, brushWidth, widths, brushThreeD).catch(() => {
                   // rejected stroke (turn rotated mid-draw) just never appears
                 });
               }}
@@ -540,6 +564,48 @@ export function GameScreen({ code, watch }: { code: string; watch: boolean }) {
                   />
                 </button>
               ))}
+              <span className="mx-1 h-5 w-px bg-stone-200" />
+              {/* pen style drawer — pressure/speed/taper dynamics or a plain nib */}
+              <div className="relative">
+                <button
+                  onClick={() => setPenMenuOpen(o => !o)}
+                  title="pen style"
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-widest transition pointer-coarse:px-3 pointer-coarse:py-1.5 ${
+                    penStyle !== 'uniform'
+                      ? 'bg-stone-900 text-stone-50'
+                      : 'text-stone-400 hover:text-stone-700'
+                  }`}
+                >
+                  {PEN_STYLES.find(p => p.id === penStyle)?.label ?? 'Pen'}
+                </button>
+                {penMenuOpen && (
+                  <>
+                    {/* click-away catcher */}
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setPenMenuOpen(false)}
+                    />
+                    <div className="absolute bottom-full left-1/2 z-20 mb-2 flex w-40 -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg">
+                      {PEN_STYLES.map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => {
+                            setPenStyle(p.id);
+                            setEraser(false);
+                            setPenMenuOpen(false);
+                          }}
+                          className={`flex flex-col items-start px-3 py-2 text-left transition ${
+                            penStyle === p.id ? 'bg-stone-100' : 'hover:bg-stone-50'
+                          }`}
+                        >
+                          <span className="text-xs font-medium text-stone-800">{p.label}</span>
+                          <span className="text-[10px] text-stone-400">{p.hint}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
               <span className="mx-1 h-5 w-px bg-stone-200" />
               <button
                 onClick={() => setEraser(v => !v)}

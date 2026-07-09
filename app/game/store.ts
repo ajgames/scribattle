@@ -46,6 +46,11 @@ export interface StrokeInfo {
   points: number[];
   color: string;
   width: number;
+  /**
+   * Per-point half-widths (one per x,y pair) for pressure/speed/taper pens.
+   * Empty for uniform strokes and legacy rows — fall back to `width`.
+   */
+  widths: number[];
   /** Raised 3D tube vs default flat ink. */
   threeD: boolean;
 }
@@ -55,6 +60,8 @@ export interface LiveStrokeInfo {
   points: number[];
   color: string;
   width: number;
+  /** Per-point half-widths (empty for uniform strokes). */
+  widths: number[];
   threeD: boolean;
 }
 
