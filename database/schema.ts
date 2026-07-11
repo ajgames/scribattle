@@ -56,6 +56,44 @@ export const unlocks = sqliteTable(
 );
 
 // ---------------------------------------------------------------------------
+// Analytics. Game rooms live in SpacetimeDB and are deleted the moment they
+// empty (see server/src/index.ts), so the live store can't answer "how many
+// rooms were created today". This append-only log is the durable record: the
+// client writes one row per room creation (via /api/analytics/event), and the
+// daily metrics cron (/api/cron/metrics) aggregates it over a 24h window.
+// ---------------------------------------------------------------------------
+
+export const analyticsEvents = sqliteTable(
+  'analytics_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    /** Event kind, e.g. 'room_created'. */
+    type: text('type').notNull(),
+    /** Small JSON blob of event-specific fields, e.g. {"isPublic":true}. */
+    meta: text('meta').notNull().default('{}'),
+    /** SpacetimeDB identity hex of the actor, when known (nullable — guests). */
+    identity: text('identity'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  t => [index('analytics_events_type_time').on(t.type, t.createdAt)]
+);
+
+/**
+ * Tiny key/value store for server-side runtime config that has nowhere else to
+ * live. Currently just the Telegram chat id auto-resolved from getUpdates so
+ * the alert cron doesn't need it hand-configured (see app/lib/telegram.server.ts).
+ */
+export const appConfig = sqliteTable('app_config', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+// ---------------------------------------------------------------------------
 // Moderation. Players are identified by their SpacetimeDB identity hex (the
 // anonymous "session id" persisted in their localStorage), not Clerk — anyone
 // can be reported, signed in or not. Escalation within a rolling window:

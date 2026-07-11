@@ -13,6 +13,8 @@ export default [
   route("sign-in/*", "routes/sign-in.tsx"),
   route("sign-up/*", "routes/sign-up.tsx"),
   route("api/profile", "routes/api.profile.ts"),
+  route("api/analytics/event", "routes/api.analytics.event.ts"),
+  route("api/cron/metrics", "routes/api.cron.metrics.ts"),
   route("api/referral/claim", "routes/api.referral.claim.ts"),
   route("api/shop/buy", "routes/api.shop.buy.ts"),
   route("api/moderation/report", "routes/api.moderation.report.ts"),

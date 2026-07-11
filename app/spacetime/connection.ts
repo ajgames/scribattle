@@ -378,12 +378,27 @@ function waitForStore(
 // Actions — the only way components talk to the server
 // ---------------------------------------------------------------------------
 
+/**
+ * Best-effort analytics ping — records events SpacetimeDB forgets (rooms are
+ * deleted when they empty) into Turso for the daily metrics alert. Fire and
+ * forget: never blocks the action, never surfaces an error to the caller.
+ */
+function trackEvent(type: string, meta: Record<string, unknown>): void {
+  void fetch('/api/analytics/event', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type, meta, identity: myIdentityHex }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
 /** Create a room (code is generated server-side) and return its code. */
 export async function createGame(username: string, isPublic = false): Promise<string> {
   const c = await connect();
   const prev = useGameStore.getState().roomCode;
   await c.reducers.createGame({ username, isPublic });
   await waitForStore(s => !!s.roomCode && s.roomCode !== prev);
+  trackEvent('room_created', { isPublic });
   return useGameStore.getState().roomCode;
 }
 
